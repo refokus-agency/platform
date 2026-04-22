@@ -1,89 +1,63 @@
-# platform — CI/CD centralizado
+# platform
 
-Repo central con reusable workflows y composite actions para los proyectos de Refokus.
+Centralized CI/CD for Refokus projects. A single source of truth for reusable GitHub Actions workflows used across all `refokus-agency` repos.
 
-## Tipos de proyecto soportados
+## What this is for
 
-- **custom-code** (sitios Webflow) — 3 ambientes: preview, stage, production.
-- **service** (backends en Vercel) — 2 ambientes: preview, production.
-- **library** (paquetes a GitHub Packages con scope `@refokus-agency`) — ci + release.
+Every Refokus project falls into one of three categories:
 
-## Qué contiene
-
-```
-.github/
-├── actions/
-│   └── setup/             # Composite action: detecta pm, instala deps, cache
-└── workflows/
-    ├── ci.yml             # Reusable: lint + typecheck + test + build
-    ├── deploy.yml         # Reusable: deploy a Vercel (preview | stage | production)
-    └── release.yml        # Reusable: semantic-release a GH Packages
-```
-
-## Cómo usarlo en un repo
-
-Copiá el caller que corresponda desde `examples/` al repo y adaptalo:
-
-- Custom-code → `examples/custom-code-caller.yml`
-- Service → `examples/service-caller.yml`
-- Library → `examples/library-caller.yml`
-
-Renombralo a `.github/workflows/ci-cd.yml` (o como prefieras) en el repo target.
-
-## Secrets requeridos
-
-Los reusables asumen `secrets: inherit` desde el caller. El repo target tiene que tener disponibles:
-
-| Secret | Requerido por | Nivel esperado |
+| Type | What it does | Example repos |
 |---|---|---|
-| `GH_PAT_TOKEN` | todos | organización |
-| `VERCEL_TOKEN` | deploy.yml | organización |
-| `VERCEL_ORG_ID` | deploy.yml | organización |
-| `VERCEL_PROJECT_ID` | deploy.yml | repo |
+| **custom-code** | Webflow sites with custom JS/CSS, deployed to Vercel | `webflow-custom-code-tmp`, client sites |
+| **service** | Backend services / integrations, deployed to Vercel | `umh-ghost-webflow-integration` |
+| **library** | Internal npm packages, published to GitHub Packages (`@refokus-agency`) | `navigation` |
 
-El `GH_PAT_TOKEN` necesita:
-- `read:packages` para consumir del registry (`ci.yml`, `deploy.yml`).
-- `write:packages` + `contents:write` para publicar (`release.yml`).
+Instead of duplicating CI/CD logic across ~10+ repos, this repo provides three reusable workflows and one composite action that each project consumes with a short caller workflow.
 
-## Package managers
+## Quick start
 
-Los reusables auto-detectan el pm del caller por lockfile (pnpm / npm / bun). Si el auto-detect confunde o hay mezcla, pasá el input `package-manager` explícito:
+Copy the caller template that matches your project type into `.github/workflows/` of your repo:
+
+- **custom-code** → [`examples/custom-code-caller.yml`](examples/custom-code-caller.yml) — 3 environments (preview, stage, production)
+- **service** → [`examples/service-caller.yml`](examples/service-caller.yml) — 2 environments (preview, production)
+- **library** → [`examples/library-caller.yml`](examples/library-caller.yml) — CI + semantic-release on `main`
+
+Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push a branch and watch it run.
+
+## What's inside
+
+```
+.
+├── .github/
+│   ├── actions/
+│   │   └── setup/              # Composite action: detect pm, install deps, cache
+│   └── workflows/
+│       ├── ci.yml              # Reusable: lint + typecheck + test + build
+│       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
+│       └── release.yml         # Reusable: semantic-release to GitHub Packages
+├── examples/                   # Caller templates, one per project type
+└── docs/                       # Detailed documentation
+```
+
+## Documentation
+
+- [Getting started](docs/getting-started.md) — set up a new repo step by step
+- [Migration guide](docs/migration.md) — move an existing repo off its bespoke workflows
+- [Secrets](docs/secrets.md) — which secrets are needed and where to configure them
+- [Architecture](docs/architecture.md) — design decisions and how the pieces fit together
+- [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
+- [Contributing](docs/contributing.md) — how to change the reusables safely
+
+## Versioning
+
+Callers currently reference `@main`:
 
 ```yaml
-ci:
-  uses: refokus-agency/platform/.github/workflows/ci.yml@main
-  with:
-    package-manager: bun
-  secrets: inherit
+uses: refokus-agency/platform/.github/workflows/ci.yml@main
 ```
 
-## Inputs comunes
+This lets us iterate quickly while the first repos migrate. Once the workflows stabilize (target: 2–3 months without breaking changes), we'll cut `@v1` tags and migrate callers to pinned versions. See [docs/contributing.md](docs/contributing.md) for details.
 
-| Input | Default | Dónde |
-|---|---|---|
-| `node-version` | `24` | todos |
-| `package-manager` | auto-detect | todos |
-| `platform-ref` | `main` | todos |
-| `environment` | **requerido** | `deploy.yml` |
-| `run-lint` / `run-typecheck` / `run-test` / `run-build` | `true` | `ci.yml` |
+## Support
 
-## Scripts esperados en el caller
-
-`ci.yml` corre los siguientes scripts si existen en `package.json` (no falla si faltan):
-
-- `lint`
-- `typecheck`
-- `test`
-- `build`
-
-## Versionado
-
-Por ahora los callers apuntan a `@main` — iteramos rápido mientras migran los primeros repos. Cuando se estabilice (2-3 meses sin cambios rotos) migramos a tags `@v1`.
-
-## Migración de un repo existente
-
-1. Borrar workflows viejos (`preview.yml`, `stage.yml`, `production.yml`, `ci.yml`, `release-package-version.yml`, etc.).
-2. Copiar el caller de ejemplo correspondiente a `.github/workflows/`.
-3. Verificar que los secrets estén configurados (org o repo).
-4. Verificar que `package.json` tenga los scripts `lint` / `typecheck` / `test` / `build` si el repo los necesita (si faltan, se skipean — no falla).
-5. Hacer un push a un branch de prueba y verificar que corra.
+Ping `@taprile314` or open an issue on this repo.
