@@ -1,0 +1,24 @@
+# Library caller — ci en todos los branches, release al mergear a main
+# Copiar este archivo a .github/workflows/ci-release.yml en el repo de library.
+
+name: CI + Release
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
+
+  release:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: refokus-agency/platform/.github/workflows/release.yml@main
+    secrets: inherit

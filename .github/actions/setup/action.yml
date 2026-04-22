@@ -1,0 +1,86 @@
+name: Setup Node + Package Manager
+description: |
+  Detects the package manager from the lockfile (or accepts an explicit override),
+  sets up Node and the package manager, installs dependencies with cache, and
+  exposes the chosen package manager as an output for subsequent steps.
+
+inputs:
+  node-version:
+    description: Node version to install.
+    required: false
+    default: '24'
+  package-manager:
+    description: Explicit override — pnpm | npm | bun. If empty, auto-detected by lockfile.
+    required: false
+    default: ''
+  pnpm-version:
+    description: pnpm version (when package manager is pnpm).
+    required: false
+    default: '10'
+  bun-version:
+    description: bun version (when package manager is bun).
+    required: false
+    default: 'latest'
+
+outputs:
+  pm:
+    description: The package manager used (pnpm | npm | bun).
+    value: ${{ steps.detect.outputs.pm }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect package manager
+      id: detect
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.package-manager }}" ]; then
+          echo "pm=${{ inputs.package-manager }}" >> "$GITHUB_OUTPUT"
+          echo "Using explicit package manager: ${{ inputs.package-manager }}"
+          exit 0
+        fi
+
+        if [ -f pnpm-lock.yaml ]; then
+          echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+        elif [ -f bun.lockb ] || [ -f bun.lock ]; then
+          echo "pm=bun" >> "$GITHUB_OUTPUT"
+        elif [ -f package-lock.json ]; then
+          echo "pm=npm" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No lockfile found. Add pnpm-lock.yaml, package-lock.json, or bun.lockb, or pass package-manager input explicitly."
+          exit 1
+        fi
+
+    - name: Setup pnpm
+      if: steps.detect.outputs.pm == 'pnpm'
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: Setup bun
+      if: steps.detect.outputs.pm == 'bun'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Setup Node (with cache for pnpm/npm)
+      if: steps.detect.outputs.pm != 'bun'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ steps.detect.outputs.pm }}
+
+    - name: Setup Node (no cache, bun handles its own)
+      if: steps.detect.outputs.pm == 'bun'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        case "${{ steps.detect.outputs.pm }}" in
+          pnpm) pnpm install --frozen-lockfile ;;
+          npm)  npm ci ;;
+          bun)  bun install --frozen-lockfile ;;
+        esac

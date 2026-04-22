@@ -1,0 +1,107 @@
+name: CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node version.
+        required: false
+        type: string
+        default: '24'
+      package-manager:
+        description: Explicit override for package manager (pnpm | npm | bun). Auto-detected by lockfile if empty.
+        required: false
+        type: string
+        default: ''
+      run-lint:
+        description: Run the lint script if present.
+        required: false
+        type: boolean
+        default: true
+      run-typecheck:
+        description: Run the typecheck script if present.
+        required: false
+        type: boolean
+        default: true
+      run-test:
+        description: Run the test script if present.
+        required: false
+        type: boolean
+        default: true
+      run-build:
+        description: Run the build script if present.
+        required: false
+        type: boolean
+        default: true
+      platform-ref:
+        description: Ref of the platform repo to checkout for composite actions. Defaults to 'main'.
+        required: false
+        type: string
+        default: main
+    secrets:
+      GH_PAT_TOKEN:
+        description: PAT with read:packages for installing from GitHub Packages (@refokus-agency).
+        required: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Checkout platform repo (for composite actions)
+        uses: actions/checkout@v4
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          token: ${{ secrets.GH_PAT_TOKEN }}
+
+      - name: Configure npm for GitHub Packages
+        run: |
+          echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PAT_TOKEN }}" >> ~/.npmrc
+        shell: bash
+
+      - name: Setup
+        id: setup
+        uses: ./.platform/.github/actions/setup
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+
+      - name: Has script
+        id: scripts
+        shell: bash
+        run: |
+          has() {
+            node -e "const s=(require('./package.json').scripts||{});process.exit(s['$1']?0:1)" 2>/dev/null
+          }
+          for s in lint typecheck test build; do
+            if has "$s"; then
+              echo "$s=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$s=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - name: Lint
+        if: inputs.run-lint && steps.scripts.outputs.lint == 'true'
+        run: ${{ steps.setup.outputs.pm }} run lint
+        shell: bash
+
+      - name: Typecheck
+        if: inputs.run-typecheck && steps.scripts.outputs.typecheck == 'true'
+        run: ${{ steps.setup.outputs.pm }} run typecheck
+        shell: bash
+
+      - name: Test
+        if: inputs.run-test && steps.scripts.outputs.test == 'true'
+        run: ${{ steps.setup.outputs.pm }} run test
+        shell: bash
+
+      - name: Build
+        if: inputs.run-build && steps.scripts.outputs.build == 'true'
+        run: ${{ steps.setup.outputs.pm }} run build
+        shell: bash

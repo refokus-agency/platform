@@ -1,0 +1,68 @@
+name: Release (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node version.
+        required: false
+        type: string
+        default: '24'
+      package-manager:
+        description: Explicit override for package manager (pnpm | npm | bun). Auto-detected by lockfile if empty.
+        required: false
+        type: string
+        default: ''
+      platform-ref:
+        description: Ref of the platform repo to checkout for composite actions.
+        required: false
+        type: string
+        default: main
+    secrets:
+      GH_PAT_TOKEN:
+        description: PAT with write:packages + contents:write for publishing and tagging.
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout platform repo (for composite actions)
+        uses: actions/checkout@v4
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          token: ${{ secrets.GH_PAT_TOKEN }}
+
+      - name: Configure npm for GitHub Packages
+        run: |
+          echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PAT_TOKEN }}" >> ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+        shell: bash
+
+      - name: Setup
+        id: setup
+        uses: ./.platform/.github/actions/setup
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+
+      - name: Semantic release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+          NPM_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+        run: ${{ steps.setup.outputs.pm }} exec semantic-release
+        shell: bash

@@ -1,0 +1,117 @@
+name: Deploy to Vercel (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Vercel environment — preview | stage | production.
+        required: true
+        type: string
+      node-version:
+        description: Node version.
+        required: false
+        type: string
+        default: '24'
+      package-manager:
+        description: Explicit override for package manager (pnpm | npm | bun). Auto-detected by lockfile if empty.
+        required: false
+        type: string
+        default: ''
+      platform-ref:
+        description: Ref of the platform repo to checkout for composite actions.
+        required: false
+        type: string
+        default: main
+    secrets:
+      GH_PAT_TOKEN:
+        description: PAT with read:packages for installing from GitHub Packages (@refokus-agency).
+        required: true
+      VERCEL_TOKEN:
+        required: true
+      VERCEL_ORG_ID:
+        required: true
+      VERCEL_PROJECT_ID:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Validate environment input
+        run: |
+          case "${{ inputs.environment }}" in
+            preview|stage|production) ;;
+            *) echo "::error::environment must be preview, stage, or production (got: ${{ inputs.environment }})"; exit 1 ;;
+          esac
+        shell: bash
+
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Checkout platform repo (for composite actions)
+        uses: actions/checkout@v4
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          token: ${{ secrets.GH_PAT_TOKEN }}
+
+      - name: Configure npm for GitHub Packages
+        run: |
+          echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PAT_TOKEN }}" >> ~/.npmrc
+        shell: bash
+
+      - name: Setup
+        id: setup
+        uses: ./.platform/.github/actions/setup
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+
+      - name: Map environment to Vercel flags
+        id: vercel
+        shell: bash
+        run: |
+          case "${{ inputs.environment }}" in
+            production)
+              echo "pull-env=production" >> "$GITHUB_OUTPUT"
+              echo "build-flag=--prod" >> "$GITHUB_OUTPUT"
+              echo "deploy-flag=--prod" >> "$GITHUB_OUTPUT"
+              ;;
+            stage|preview)
+              echo "pull-env=preview" >> "$GITHUB_OUTPUT"
+              echo "build-flag=" >> "$GITHUB_OUTPUT"
+              echo "deploy-flag=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+        shell: bash
+
+      - name: Vercel pull
+        run: vercel pull --yes --environment=${{ steps.vercel.outputs.pull-env }} --token=${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+
+      - name: Vercel build
+        run: vercel build ${{ steps.vercel.outputs.build-flag }} --token=${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+
+      - name: Vercel deploy
+        id: deploy
+        run: |
+          URL=$(vercel deploy --prebuilt ${{ steps.vercel.outputs.deploy-flag }} --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed to: $URL"
+        shell: bash
+
+      - name: Alias for stage
+        if: inputs.environment == 'stage'
+        run: |
+          STAGE_ALIAS="${GITHUB_REPOSITORY##*/}-stage.vercel.app"
+          vercel alias set "${{ steps.deploy.outputs.url }}" "$STAGE_ALIAS" --token=${{ secrets.VERCEL_TOKEN }}
+        shell: bash
