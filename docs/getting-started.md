@@ -75,6 +75,15 @@ The examples work out of the box. Tweak only if you need to:
     run-lint: false
   ```
 
+- **Allow install scripts.** By default the composite action passes `--ignore-scripts` to pnpm/npm/bun, which disables `postinstall` / `prepare` / similar lifecycle scripts during `install`. This is a security precaution against supply-chain attacks. If your repo legitimately needs those scripts to run (native modules like `sharp` or `bcrypt`, binary downloaders like `puppeteer`), opt out explicitly:
+
+  ```yaml
+  with:
+    unsafe-install-scripts: true
+  ```
+
+  The name signals the risk — enabling this re-opens a path for compromised dependencies to exfiltrate secrets. See [dependabot.md](dependabot.md) for details.
+
 ## 4. Verify secrets
 
 Your repo needs these secrets available (via org inheritance or repo-level):

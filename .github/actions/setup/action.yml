@@ -21,6 +21,21 @@ inputs:
     description: bun version (when package manager is bun).
     required: false
     default: 'latest'
+  unsafe-install-scripts:
+    description: |
+      DANGEROUS — setting this to 'true' lets dependencies run postinstall /
+      preinstall / prepare scripts during `install`. These scripts execute
+      with full access to the runner's environment, including any secrets
+      set for the workflow. A compromised dependency can exfiltrate secrets
+      or perform arbitrary actions in your repo.
+
+      The default ('false') passes `--ignore-scripts` to the package
+      manager, which is the safe choice for CI. Only set to 'true' if your
+      project legitimately needs postinstall (native modules like sharp,
+      bcrypt, canvas; binary downloads like puppeteer / electron). Consider
+      scoping secrets narrowly if you must enable this.
+    required: false
+    default: 'false'
 
 outputs:
   pm:
@@ -79,8 +94,15 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
+        if [ "${{ inputs.unsafe-install-scripts }}" = "true" ]; then
+          echo "::warning::unsafe-install-scripts=true — postinstall scripts will run. Ensure you trust all dependencies; malicious scripts can exfiltrate secrets."
+          SCRIPTS_FLAG=""
+        else
+          SCRIPTS_FLAG="--ignore-scripts"
+        fi
+
         case "${{ steps.detect.outputs.pm }}" in
-          pnpm) pnpm install --frozen-lockfile ;;
-          npm)  npm ci ;;
-          bun)  bun install --frozen-lockfile ;;
+          pnpm) pnpm install --frozen-lockfile $SCRIPTS_FLAG ;;
+          npm)  npm ci $SCRIPTS_FLAG ;;
+          bun)  bun install --frozen-lockfile $SCRIPTS_FLAG ;;
         esac

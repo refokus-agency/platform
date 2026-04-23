@@ -31,6 +31,14 @@ on:
           @semantic-release/changelog
           @semantic-release/git
           @semantic-release/exec
+      unsafe-install-scripts:
+        description: |
+          DANGEROUS — setting to true lets dependencies run postinstall scripts. A compromised
+          dependency can exfiltrate secrets. Default false. Only enable if your project needs
+          postinstall (native modules like sharp, bcrypt, puppeteer).
+        required: false
+        type: boolean
+        default: false
     secrets:
       GH_PAT_TOKEN:
         description: PAT with write:packages + contents:write for publishing and tagging.
@@ -72,6 +80,7 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
+          unsafe-install-scripts: ${{ inputs.unsafe-install-scripts }}
 
       - name: Semantic release
         uses: cycjimmy/semantic-release-action@v4
