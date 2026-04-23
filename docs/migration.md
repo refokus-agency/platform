@@ -87,7 +87,7 @@ rm .github/workflows/release-package-version.yml
 
 # Copy the two new caller files from platform/examples/library/
 BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library
-curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/pr.yml $BASE/pr.yml
 curl -o .github/workflows/release.yml $BASE/release.yml
 
 git add .github/workflows/

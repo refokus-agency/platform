@@ -19,7 +19,7 @@ Each project type has a small set of caller workflows. Each file handles one tri
 |---|---|
 | A Webflow site with custom code | [`examples/custom-code/`](../examples/custom-code/) — 3 files: `pr.yml`, `stage.yml`, `production.yml` |
 | A backend service or integration on Vercel | [`examples/service/`](../examples/service/) — 2 files: `pr.yml`, `deploy.yml` |
-| An npm library for `@refokus-agency` | [`examples/library/`](../examples/library/) — 2 files: `ci.yml`, `release.yml` |
+| An npm library for `@refokus-agency` | [`examples/library/`](../examples/library/) — 2 files: `pr.yml`, `release.yml` |
 
 ## 2. Add the caller files to your repo
 
@@ -28,8 +28,8 @@ Copy the files into `.github/workflows/` in your repo, keeping their filenames.
 ```bash
 # From your project root, for a library
 mkdir -p .github/workflows
-curl -o .github/workflows/ci.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/ci.yml
+curl -o .github/workflows/pr.yml \
+  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/pr.yml
 curl -o .github/workflows/release.yml \
   https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/release.yml
 ```

@@ -20,7 +20,7 @@ Copy the caller templates that match your project type into `.github/workflows/`
 
 - **custom-code** → [`examples/custom-code/`](examples/custom-code/) — `pr.yml` (PR + preview), `stage.yml` (push to `main`), `production.yml` (push to `production`)
 - **service** → [`examples/service/`](examples/service/) — `pr.yml` (PR + preview), `deploy.yml` (push to `main` → production)
-- **library** → [`examples/library/`](examples/library/) — `ci.yml` (PR), `release.yml` (push to `main` → semantic-release)
+- **library** → [`examples/library/`](examples/library/) — `pr.yml` (PR), `release.yml` (push to `main` → semantic-release)
 
 Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push a branch and watch it run.
 
@@ -38,7 +38,7 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 ├── examples/
 │   ├── custom-code/            # pr.yml + stage.yml + production.yml
 │   ├── service/                # pr.yml + deploy.yml
-│   └── library/                # ci.yml + release.yml
+│   └── library/                # pr.yml + release.yml
 └── docs/                       # Detailed documentation
 ```
 
