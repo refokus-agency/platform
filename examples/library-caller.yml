@@ -1,15 +1,15 @@
-# Library caller — ci en todos los branches, release al mergear a main
-# Copiar este archivo a .github/workflows/ci-release.yml en el repo de library.
+# Library caller — CI on PRs, release on push to main.
+# Copy this file to .github/workflows/ci-release.yml in the library repo.
 
 name: CI + Release
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
