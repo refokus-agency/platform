@@ -113,5 +113,7 @@ jobs:
         if: inputs.environment == 'stage'
         run: |
           STAGE_ALIAS="${GITHUB_REPOSITORY##*/}-stage.vercel.app"
-          vercel alias set "${{ steps.deploy.outputs.url }}" "$STAGE_ALIAS" --token=${{ secrets.VERCEL_TOKEN }}
+          vercel alias set "${{ steps.deploy.outputs.url }}" "$STAGE_ALIAS" \
+            --scope "${{ secrets.VERCEL_ORG_ID }}" \
+            --token="${{ secrets.VERCEL_TOKEN }}"
         shell: bash
