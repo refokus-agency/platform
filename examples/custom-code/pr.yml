@@ -1,7 +1,7 @@
-# Custom-code CI — runs CI and deploys a Vercel preview on pull requests.
-# Copy to .github/workflows/ci.yml in the custom-code repo.
+# Custom-code PR workflow — runs CI and deploys a Vercel preview on pull requests.
+# Copy to .github/workflows/pr.yml in the custom-code repo.
 
-name: CI
+name: Pull Request
 
 on:
   pull_request:

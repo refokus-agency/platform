@@ -17,8 +17,8 @@ Each project type has a small set of caller workflows. Each file handles one tri
 
 | Your project is… | Copy these files |
 |---|---|
-| A Webflow site with custom code | [`examples/custom-code/`](../examples/custom-code/) — 3 files: `ci.yml`, `stage.yml`, `production.yml` |
-| A backend service or integration on Vercel | [`examples/service/`](../examples/service/) — 2 files: `ci.yml`, `deploy.yml` |
+| A Webflow site with custom code | [`examples/custom-code/`](../examples/custom-code/) — 3 files: `pr.yml`, `stage.yml`, `production.yml` |
+| A backend service or integration on Vercel | [`examples/service/`](../examples/service/) — 2 files: `pr.yml`, `deploy.yml` |
 | An npm library for `@refokus-agency` | [`examples/library/`](../examples/library/) — 2 files: `ci.yml`, `release.yml` |
 
 ## 2. Add the caller files to your repo

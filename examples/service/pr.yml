@@ -1,7 +1,7 @@
-# Service CI — runs CI and deploys a Vercel preview on pull requests.
-# Copy to .github/workflows/ci.yml in the service repo.
+# Service PR workflow — runs CI and deploys a Vercel preview on pull requests.
+# Copy to .github/workflows/pr.yml in the service repo.
 
-name: CI
+name: Pull Request
 
 on:
   pull_request:
