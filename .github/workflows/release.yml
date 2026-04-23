@@ -18,6 +18,19 @@ on:
         required: false
         type: string
         default: main
+      semantic-release-version:
+        description: Version of semantic-release to install (passed to cycjimmy/semantic-release-action).
+        required: false
+        type: string
+        default: '24'
+      extra-plugins:
+        description: Extra semantic-release plugins to install, newline- or space-separated. Defaults to the common Refokus set (@semantic-release/changelog, @semantic-release/git, @semantic-release/exec).
+        required: false
+        type: string
+        default: |
+          @semantic-release/changelog
+          @semantic-release/git
+          @semantic-release/exec
     secrets:
       GH_PAT_TOKEN:
         description: PAT with write:packages + contents:write for publishing and tagging.
@@ -61,8 +74,11 @@ jobs:
           package-manager: ${{ inputs.package-manager }}
 
       - name: Semantic release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          ci: true
+          semantic_version: ${{ inputs.semantic-release-version }}
+          extra_plugins: ${{ inputs.extra-plugins }}
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
-          NPM_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
-        run: ${{ steps.setup.outputs.pm }} exec semantic-release
-        shell: bash
