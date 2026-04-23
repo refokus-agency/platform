@@ -44,7 +44,7 @@ on:
         required: true
 
 jobs:
-  ci:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
