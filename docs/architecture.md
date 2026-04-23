@@ -73,7 +73,15 @@ A parameterized reusable collapses them into one file. The caller loses nothing:
 Two reasons:
 
 1. **Different project types have different flows.** Custom-code has 3 environments, service has 2. A reusable that encoded "main → stage, production → production" would be wrong for services. A reusable that encoded "main → production" would be wrong for custom-code.
-2. **Callers are cheap to read.** The `if: github.ref == '...'` lines in each caller job make the flow explicit at the point of use. No indirection to a reusable to figure out what a branch does.
+2. **Callers are cheap to read.** Each caller file declares its trigger in the `on:` block. No indirection to a reusable to figure out what a branch does.
+
+### Why one caller file per trigger instead of one file with conditional jobs?
+
+Earlier iterations had a single caller file per repo (`ci-cd.yml`) with multiple jobs gated by `if: github.event_name == 'push' && github.ref == '...'`. That works, but on every PR the UI shows a "skipped" check for each job that doesn't match the event.
+
+Splitting into one file per trigger (e.g. custom-code: `ci.yml` on PR, `stage.yml` on main push, `production.yml` on production push) means every file that fires has all its jobs run — no skipped checks cluttering the PR UI. A bit more files per repo, but each one is tiny (10–15 lines) and does exactly one thing.
+
+Libraries get `ci.yml` + `release.yml`. Services get `ci.yml` + `deploy.yml`. Custom-code gets `ci.yml` + `stage.yml` + `production.yml`.
 
 ### Why build in both CI and deploy?
 

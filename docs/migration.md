@@ -12,9 +12,9 @@ How to move an existing repo off its bespoke workflows and onto the centralized 
 
 1. Create a feature branch from `main`.
 2. Delete the old workflow files.
-3. Add the new caller file.
+3. Copy the new caller files (one per trigger) from the matching `examples/` subfolder.
 4. Verify secrets are accessible.
-5. Push and watch the Actions tab.
+5. Push and open a PR; watch the Actions tab.
 6. Fix anything that breaks.
 7. Merge when green.
 
@@ -32,9 +32,13 @@ How to move an existing repo off its bespoke workflows and onto the centralized 
 ```bash
 git checkout -b migrate-to-platform-cicd
 rm .github/workflows/preview.yml .github/workflows/stage.yml .github/workflows/production.yml
-# Copy the caller
-curl -o .github/workflows/ci-cd.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/custom-code-caller.yml
+
+# Copy the three new caller files from platform/examples/custom-code/
+BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/custom-code
+curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/stage.yml $BASE/stage.yml
+curl -o .github/workflows/production.yml $BASE/production.yml
+
 git add .github/workflows/
 git commit -m "ci: migrate to centralized platform workflows"
 git push -u origin migrate-to-platform-cicd
@@ -42,7 +46,7 @@ git push -u origin migrate-to-platform-cicd
 
 **Gotchas:**
 - The old workflows probably didn't run lint/typecheck/test. The new CI will. If your `package.json` has those scripts and they're currently broken, the migration PR will expose them. Decide: fix them, or delete the scripts.
-- Check that the branch names in the new caller match your repo's convention (`main`, `production`). If your repo uses different names, adapt the `if:` conditions.
+- If your repo uses different branch names than `main` / `production`, adapt the `on: push: branches:` in `stage.yml` / `production.yml`.
 
 ### service repos
 
@@ -56,8 +60,12 @@ git push -u origin migrate-to-platform-cicd
 ```bash
 git checkout -b migrate-to-platform-cicd
 rm .github/workflows/ci.yml .github/workflows/deploy-preview.yml .github/workflows/deploy-production.yml
-curl -o .github/workflows/ci-cd.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/service-caller.yml
+
+# Copy the two new caller files from platform/examples/service/
+BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/service
+curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/deploy.yml $BASE/deploy.yml
+
 git add .github/workflows/
 git commit -m "ci: migrate to centralized platform workflows"
 git push -u origin migrate-to-platform-cicd
@@ -76,15 +84,19 @@ git push -u origin migrate-to-platform-cicd
 ```bash
 git checkout -b migrate-to-platform-cicd
 rm .github/workflows/release-package-version.yml
-curl -o .github/workflows/ci-release.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library-caller.yml
+
+# Copy the two new caller files from platform/examples/library/
+BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library
+curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/release.yml $BASE/release.yml
+
 git add .github/workflows/
 git commit -m "ci: migrate to centralized platform workflows"
 git push -u origin migrate-to-platform-cicd
 ```
 
 **Gotchas:**
-- Your repo needs `semantic-release` in its devDependencies and a `.releaserc` (or equivalent) config. The reusable runs `<pm> exec semantic-release` — it doesn't provide the config.
+- Your repo needs a `.releaserc` (or equivalent) with the plugin list. The reusable ships `semantic-release` via `cycjimmy/semantic-release-action` with the common Refokus extras (`changelog`, `git`, `exec`) — you don't need them in devDependencies.
 - Make sure `publishConfig` in `package.json` points at GitHub Packages:
   ```json
   {
@@ -100,13 +112,14 @@ Before merging the migration PR, verify:
 
 - [ ] CI runs and passes on the migration branch.
 - [ ] For Vercel projects: the preview deployment succeeds and the URL works.
-- [ ] Old workflows don't still run (check the Actions tab for ghost runs from deleted files — shouldn't happen, but worth a look).
+- [ ] No old workflows still run — check the Actions tab for ghost runs from deleted files.
 - [ ] No secrets errors in the logs (`GH_PAT_TOKEN`, Vercel tokens, etc.).
 
 Once the migration PR is merged:
 
-- Push to `main` → verify stage deploy (custom-code) or production (service).
-- Push to `production` → verify production deploy (custom-code).
+- **library**: push a Conventional Commit (`fix:`, `feat:`) to `main` and verify a new version lands in GitHub Packages.
+- **service**: the merge to `main` itself triggers `deploy.yml` → production.
+- **custom-code**: the merge to `main` triggers `stage.yml`. To promote to production, push or merge into the `production` branch.
 
 ## Rolling back
 

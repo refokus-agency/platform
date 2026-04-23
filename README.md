@@ -16,11 +16,11 @@ Instead of duplicating CI/CD logic across ~10+ repos, this repo provides three r
 
 ## Quick start
 
-Copy the caller template that matches your project type into `.github/workflows/` of your repo:
+Copy the caller templates that match your project type into `.github/workflows/` of your repo. Each type uses one file per trigger (PR, push to main, etc.) so no workflow run produces skipped jobs in the PR UI.
 
-- **custom-code** → [`examples/custom-code-caller.yml`](examples/custom-code-caller.yml) — 3 environments (preview, stage, production)
-- **service** → [`examples/service-caller.yml`](examples/service-caller.yml) — 2 environments (preview, production)
-- **library** → [`examples/library-caller.yml`](examples/library-caller.yml) — CI + semantic-release on `main`
+- **custom-code** → [`examples/custom-code/`](examples/custom-code/) — `ci.yml` (PR + preview), `stage.yml` (push to `main`), `production.yml` (push to `production`)
+- **service** → [`examples/service/`](examples/service/) — `ci.yml` (PR + preview), `deploy.yml` (push to `main` → production)
+- **library** → [`examples/library/`](examples/library/) — `ci.yml` (PR), `release.yml` (push to `main` → semantic-release)
 
 Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push a branch and watch it run.
 
@@ -35,7 +35,10 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
 │       └── release.yml         # Reusable: semantic-release to GitHub Packages
-├── examples/                   # Caller templates, one per project type
+├── examples/
+│   ├── custom-code/            # ci.yml + stage.yml + production.yml
+│   ├── service/                # ci.yml + deploy.yml
+│   └── library/                # ci.yml + release.yml
 └── docs/                       # Detailed documentation
 ```
 

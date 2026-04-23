@@ -10,7 +10,7 @@ Common failure modes when using the centralized workflows, and how to fix them.
 
 - The caller file isn't in `.github/workflows/`. Must be that exact path.
 - The file has a YAML syntax error. GitHub silently ignores invalid workflows. Check Actions → "All workflows" — broken files sometimes show up with a warning icon. You can also lint locally with `gh workflow view` or `yamllint`.
-- The triggering event doesn't match. The example callers use `on: push: branches: ['**']`. If your repo protects main and you pushed directly via API or something unusual, the event might not be `push`.
+- The triggering event doesn't match. Each caller file declares specific triggers (`pull_request`, or `push: branches: [main]`, etc.). A push to a branch that's not in the list, or a PR event that doesn't fire (draft PRs on some configurations), won't trigger anything.
 - Branch protection is blocking the run before it starts.
 
 **Fix:** verify the file path and syntax, then check the event type matches `on:`.

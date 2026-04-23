@@ -1,0 +1,23 @@
+# Custom-code CI — runs CI and deploys a Vercel preview on pull requests.
+# Copy to .github/workflows/ci.yml in the custom-code repo.
+
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
+
+  deploy-preview:
+    needs: ci
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@main
+    with:
+      environment: preview
+    secrets: inherit

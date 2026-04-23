@@ -1,0 +1,22 @@
+# Library release — runs CI and semantic-release on push to main.
+# Copy to .github/workflows/release.yml in the library repo.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
+
+  release:
+    needs: ci
+    uses: refokus-agency/platform/.github/workflows/release.yml@main
+    secrets: inherit
