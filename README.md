@@ -4,25 +4,34 @@ Centralized CI/CD for Refokus projects. A single source of truth for reusable Gi
 
 ## What this is for
 
-Every Refokus project falls into one of three categories:
-
-| Type | What it does | Example repos |
-|---|---|---|
-| **custom-code** | Webflow sites with custom JS/CSS, deployed to Vercel | `webflow-custom-code-tmp`, client sites |
-| **service** | Backend services / integrations, deployed to Vercel | `umh-ghost-webflow-integration` |
-| **library** | Internal npm packages, published to GitHub Packages (`@refokus-agency`) | `navigation` |
-
-Instead of duplicating CI/CD logic across ~10+ repos, this repo provides three reusable workflows and one composite action that each project consumes with a short caller workflow.
+Instead of duplicating CI/CD logic across repos, this repo provides three reusable workflows (CI, deploy, release) plus a composite action (setup) that each project consumes with small caller workflow files.
 
 ## Quick start
 
-Copy the caller templates that match your project type into `.github/workflows/` of your repo. Each type uses one file per trigger (PR, push to main, etc.) so no workflow run produces skipped jobs in the PR UI.
+Pick the workflow files that match **the triggers your repo cares about** and copy them from [`examples/`](examples/) into `.github/workflows/` in your repo. Each file is one trigger → one action, so nothing gets skipped in the UI.
 
-- **custom-code** → [`examples/custom-code/`](examples/custom-code/) — `pr.yml` (PR + preview), `stage.yml` (push to `main`), `production.yml` (push to `production`)
-- **service** → [`examples/service/`](examples/service/) — `pr.yml` (PR + preview), `deploy.yml` (push to `main` → production)
-- **library** → [`examples/library/`](examples/library/) — `pr.yml` (PR), `release.yml` (push to `main` → semantic-release)
+### Available atomic workflows
 
-Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push a branch and watch it run.
+| File | Trigger | What it runs |
+|---|---|---|
+| [`pr-ci.yml`](examples/pr-ci.yml) | PR | CI only (lint + typecheck + test + build) |
+| [`pr-preview.yml`](examples/pr-preview.yml) | PR | CI + Vercel preview deploy |
+| [`main-stage.yml`](examples/main-stage.yml) | push to `main` | CI + Vercel stage deploy |
+| [`main-production.yml`](examples/main-production.yml) | push to `main` | CI + Vercel production deploy |
+| [`production-deploy.yml`](examples/production-deploy.yml) | push to `production` | CI + Vercel production deploy |
+| [`main-release.yml`](examples/main-release.yml) | push to `main` | CI + semantic-release to GitHub Packages |
+
+### Common shapes
+
+| Your repo is… | Copy these |
+|---|---|
+| An npm library (release to GH Packages) | `pr-ci.yml` + `main-release.yml` |
+| A Vercel-deployed app, 2 envs (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
+| A Vercel-deployed app, 3 envs (preview on PR, stage on main, prod on a `production` branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
+
+The shape is **per repo**, not per project type. A service can be 2-env or 3-env. A Webflow custom-code site can be 2-env if you don't need a stage gate. Pick the combo that matches your flow.
+
+Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push and watch it run.
 
 ## What's inside
 
@@ -35,10 +44,7 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
 │       └── release.yml         # Reusable: semantic-release to GitHub Packages
-├── examples/
-│   ├── custom-code/            # pr.yml + stage.yml + production.yml
-│   ├── service/                # pr.yml + deploy.yml
-│   └── library/                # pr.yml + release.yml
+├── examples/                   # Atomic caller workflows, one per trigger
 └── docs/                       # Detailed documentation
 ```
 

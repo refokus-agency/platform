@@ -11,30 +11,41 @@ Before you start, make sure:
 - Your `package.json` has the scripts you want CI to run (`lint`, `typecheck`, `test`, `build` — all optional).
 - For Vercel-deployed projects: a Vercel project exists and `VERCEL_PROJECT_ID` is set at the repo level.
 
-## 1. Pick your project type
+## 1. Figure out which workflows you need
 
-Each project type has a small set of caller workflows. Each file handles one trigger (PR, push to a specific branch) so the PR UI never shows a skipped check.
+The workflows in [`examples/`](../examples/) are **atomic**: each file handles one trigger (PR, push to main, push to production) and one action. Pick the ones that match the triggers your repo cares about.
 
-| Your project is… | Copy these files |
+| File | Trigger | What it runs |
+|---|---|---|
+| `pr-ci.yml` | PR | CI only |
+| `pr-preview.yml` | PR | CI + preview deploy |
+| `main-stage.yml` | push to `main` | CI + stage deploy |
+| `main-production.yml` | push to `main` | CI + production deploy |
+| `production-deploy.yml` | push to `production` | CI + production deploy |
+| `main-release.yml` | push to `main` | CI + semantic-release |
+
+Common combinations:
+
+| Shape | Files |
 |---|---|
-| A Webflow site with custom code | [`examples/custom-code/`](../examples/custom-code/) — 3 files: `pr.yml`, `stage.yml`, `production.yml` |
-| A backend service or integration on Vercel | [`examples/service/`](../examples/service/) — 2 files: `pr.yml`, `deploy.yml` |
-| An npm library for `@refokus-agency` | [`examples/library/`](../examples/library/) — 2 files: `pr.yml`, `release.yml` |
+| Library (release on main) | `pr-ci.yml` + `main-release.yml` |
+| Vercel 2-env (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
+| Vercel 3-env (preview on PR, stage on main, prod on production branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
 
-## 2. Add the caller files to your repo
+If your repo has a shape not listed, combine the atomic files that match your triggers. The reusables work fine in any valid combo.
 
-Copy the files into `.github/workflows/` in your repo, keeping their filenames.
+## 2. Copy the files into your repo
+
+Keep their filenames — the naming convention is shared across Refokus repos so anyone browsing any `.github/workflows/` folder recognizes the pattern.
 
 ```bash
-# From your project root, for a library
+# Example for a 3-env Vercel service
 mkdir -p .github/workflows
-curl -o .github/workflows/pr.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/pr.yml
-curl -o .github/workflows/release.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/release.yml
+BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples
+curl -o .github/workflows/pr-preview.yml $BASE/pr-preview.yml
+curl -o .github/workflows/main-stage.yml $BASE/main-stage.yml
+curl -o .github/workflows/production-deploy.yml $BASE/production-deploy.yml
 ```
-
-Replace `library` with `service` or `custom-code` as needed.
 
 ## 3. Adapt the callers (if needed)
 
@@ -79,9 +90,7 @@ Check under **Settings → Secrets and variables → Actions** in the repo. Anyt
 
 See [secrets.md](secrets.md) for how to create them.
 
-## 5. Push a branch and verify
-
-Open a pull request to trigger the workflow:
+## 5. Open a PR and verify
 
 ```bash
 git checkout -b test-ci
@@ -90,25 +99,21 @@ git push -u origin test-ci
 gh pr create --fill
 ```
 
-In the PR:
+In the PR checks:
 
-1. The `CI` workflow appears and starts running.
-2. The `ci` job passes (or fails with a useful error you can fix).
-3. For Vercel projects, `deploy-preview` runs after CI and produces a preview URL.
+1. Each workflow you added that triggers on `pull_request` appears.
+2. The CI job passes (or fails with an actionable error).
+3. If you included `pr-preview.yml`, the preview deploy runs and produces a URL.
 
-For stage/production deploys (custom-code) or production deploys (service) or releases (library), merge the PR into `main` (or push to `production` for custom-code's production env) and watch the corresponding workflow in the Actions tab.
+For on-push flows (stage, production, release), merge the PR or push to the corresponding branch and watch the Actions tab.
 
 If something breaks, check [troubleshooting.md](troubleshooting.md).
 
-## 6. Iterate
-
-Delete the test branch once it's green. Future PRs will follow the same flow automatically.
-
 ## What happens under the hood
 
-When you push:
+When a trigger fires:
 
-1. The relevant caller workflow runs in your repo (based on the event — PR, push to main, push to production).
+1. The matching workflow file in your repo runs.
 2. It calls the reusable(s) in `refokus-agency/platform`.
 3. Each reusable checks out your repo, sets up Node + package manager, runs its steps, and exits.
 4. Your repo never has to know how lint/test/deploy actually work — it just declares "on this trigger, run these reusables".
