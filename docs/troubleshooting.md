@@ -2,6 +2,8 @@
 
 Common failure modes when using the centralized workflows, and how to fix them.
 
+> **Dependabot PRs fail by default.** This is expected, not a bug. See [dependabot.md](dependabot.md) for the recommended review + rerun flow.
+
 ## CI or deploy doesn't trigger at all
 
 **Symptoms:** you push and nothing happens in the Actions tab.
