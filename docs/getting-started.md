@@ -13,28 +13,32 @@ Before you start, make sure:
 
 ## 1. Pick your project type
 
-| Your project is… | Use this caller |
+Each project type has a small set of caller workflows. Each file handles one trigger (PR, push to a specific branch) so the PR UI never shows a skipped check.
+
+| Your project is… | Copy these files |
 |---|---|
-| A Webflow site with custom code | [`examples/custom-code-caller.yml`](../examples/custom-code-caller.yml) |
-| A backend service or integration on Vercel | [`examples/service-caller.yml`](../examples/service-caller.yml) |
-| An npm library for `@refokus-agency` | [`examples/library-caller.yml`](../examples/library-caller.yml) |
+| A Webflow site with custom code | [`examples/custom-code/`](../examples/custom-code/) — 3 files: `ci.yml`, `stage.yml`, `production.yml` |
+| A backend service or integration on Vercel | [`examples/service/`](../examples/service/) — 2 files: `ci.yml`, `deploy.yml` |
+| An npm library for `@refokus-agency` | [`examples/library/`](../examples/library/) — 2 files: `ci.yml`, `release.yml` |
 
-## 2. Add the caller to your repo
+## 2. Add the caller files to your repo
 
-Copy the caller file into `.github/workflows/` in your repo. You can name it whatever makes sense (`ci-cd.yml`, `main.yml`, etc.) — GitHub just needs it in that directory.
+Copy the files into `.github/workflows/` in your repo, keeping their filenames.
 
 ```bash
-# From your project root
+# From your project root, for a library
 mkdir -p .github/workflows
-curl -o .github/workflows/ci-cd.yml \
-  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/custom-code-caller.yml
+curl -o .github/workflows/ci.yml \
+  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/ci.yml
+curl -o .github/workflows/release.yml \
+  https://raw.githubusercontent.com/refokus-agency/platform/main/examples/library/release.yml
 ```
 
-Or open the file in GitHub and copy-paste its contents.
+Replace `library` with `service` or `custom-code` as needed.
 
-## 3. Adapt the caller (if needed)
+## 3. Adapt the callers (if needed)
 
-The examples are written to work out of the box. Tweak only if you need to:
+The examples work out of the box. Tweak only if you need to:
 
 - **Override the package manager.** Auto-detect works 99% of the time. If your repo has a weird lockfile state, pass it explicitly:
 
@@ -77,33 +81,36 @@ See [secrets.md](secrets.md) for how to create them.
 
 ## 5. Push a branch and verify
 
-Push a test branch to trigger the workflow:
+Open a pull request to trigger the workflow:
 
 ```bash
 git checkout -b test-ci
 git commit --allow-empty -m "test: trigger CI"
 git push -u origin test-ci
+gh pr create --fill
 ```
 
-Go to the **Actions** tab in your repo and verify:
+In the PR:
 
-1. The workflow appeared and started running.
+1. The `CI` workflow appears and starts running.
 2. The `ci` job passes (or fails with a useful error you can fix).
-3. For Vercel projects, the preview deployment job runs after CI and produces a preview URL.
+3. For Vercel projects, `deploy-preview` runs after CI and produces a preview URL.
+
+For stage/production deploys (custom-code) or production deploys (service) or releases (library), merge the PR into `main` (or push to `production` for custom-code's production env) and watch the corresponding workflow in the Actions tab.
 
 If something breaks, check [troubleshooting.md](troubleshooting.md).
 
-## 6. Merge and iterate
+## 6. Iterate
 
-Once the test branch works, delete it and move on. Production and stage deploys will trigger automatically on pushes to `main` / `production`, per the caller's `if` conditions.
+Delete the test branch once it's green. Future PRs will follow the same flow automatically.
 
 ## What happens under the hood
 
 When you push:
 
-1. The caller workflow runs in your repo.
+1. The relevant caller workflow runs in your repo (based on the event — PR, push to main, push to production).
 2. It calls the reusable(s) in `refokus-agency/platform`.
-3. Each reusable checks out your repo, sets up Node + pm, runs its steps, and exits.
-4. Your repo never has to know how lint/test/deploy actually work — it just declares "run CI + deploy to preview".
+3. Each reusable checks out your repo, sets up Node + package manager, runs its steps, and exits.
+4. Your repo never has to know how lint/test/deploy actually work — it just declares "on this trigger, run these reusables".
 
 See [architecture.md](architecture.md) for the full design.

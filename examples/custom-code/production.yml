@@ -1,0 +1,24 @@
+# Custom-code production — runs CI and deploys to production on push to production.
+# Copy to .github/workflows/production.yml in the custom-code repo.
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [production]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
+
+  deploy-production:
+    needs: ci
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@main
+    with:
+      environment: production
+    secrets: inherit
