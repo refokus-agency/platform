@@ -81,9 +81,9 @@ Earlier iterations had a single caller file per repo (`ci-cd.yml`) with multiple
 
 Splitting into one file per trigger (e.g. custom-code: `pr.yml` on PR, `stage.yml` on main push, `production.yml` on production push) means every file that fires has all its jobs run — no skipped checks cluttering the PR UI. A bit more files per repo, but each one is tiny (10–15 lines) and does exactly one thing.
 
-Libraries get `ci.yml` + `release.yml`. Services get `pr.yml` + `deploy.yml`. Custom-code gets `pr.yml` + `stage.yml` + `production.yml`.
+Libraries get `pr.yml` + `release.yml`. Services get `pr.yml` + `deploy.yml`. Custom-code gets `pr.yml` + `stage.yml` + `production.yml`.
 
-File naming convention: the filename reflects **when** the workflow fires (`pr.yml`, `stage.yml`, `production.yml`, `release.yml`). The `name:` inside reflects the same. For libraries, `ci.yml` is kept because the workflow is pure CI — no preview deploy to muddy the name.
+File naming convention: the filename reflects **when** the workflow fires (`pr.yml`, `stage.yml`, `production.yml`, `release.yml`). The `name:` inside matches. Applies uniformly across all project types — no per-type exceptions — so any Refokus repo has predictable workflow filenames.
 
 ### Why build in both CI and deploy?
 
