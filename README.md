@@ -18,8 +18,8 @@ Instead of duplicating CI/CD logic across ~10+ repos, this repo provides three r
 
 Copy the caller templates that match your project type into `.github/workflows/` of your repo. Each type uses one file per trigger (PR, push to main, etc.) so no workflow run produces skipped jobs in the PR UI.
 
-- **custom-code** → [`examples/custom-code/`](examples/custom-code/) — `ci.yml` (PR + preview), `stage.yml` (push to `main`), `production.yml` (push to `production`)
-- **service** → [`examples/service/`](examples/service/) — `ci.yml` (PR + preview), `deploy.yml` (push to `main` → production)
+- **custom-code** → [`examples/custom-code/`](examples/custom-code/) — `pr.yml` (PR + preview), `stage.yml` (push to `main`), `production.yml` (push to `production`)
+- **service** → [`examples/service/`](examples/service/) — `pr.yml` (PR + preview), `deploy.yml` (push to `main` → production)
 - **library** → [`examples/library/`](examples/library/) — `ci.yml` (PR), `release.yml` (push to `main` → semantic-release)
 
 Make sure the required secrets are available at org or repo level (see [docs/secrets.md](docs/secrets.md)), then push a branch and watch it run.
@@ -36,8 +36,8 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
 │       └── release.yml         # Reusable: semantic-release to GitHub Packages
 ├── examples/
-│   ├── custom-code/            # ci.yml + stage.yml + production.yml
-│   ├── service/                # ci.yml + deploy.yml
+│   ├── custom-code/            # pr.yml + stage.yml + production.yml
+│   ├── service/                # pr.yml + deploy.yml
 │   └── library/                # ci.yml + release.yml
 └── docs/                       # Detailed documentation
 ```

@@ -35,7 +35,7 @@ rm .github/workflows/preview.yml .github/workflows/stage.yml .github/workflows/p
 
 # Copy the three new caller files from platform/examples/custom-code/
 BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/custom-code
-curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/pr.yml $BASE/pr.yml
 curl -o .github/workflows/stage.yml $BASE/stage.yml
 curl -o .github/workflows/production.yml $BASE/production.yml
 
@@ -63,7 +63,7 @@ rm .github/workflows/ci.yml .github/workflows/deploy-preview.yml .github/workflo
 
 # Copy the two new caller files from platform/examples/service/
 BASE=https://raw.githubusercontent.com/refokus-agency/platform/main/examples/service
-curl -o .github/workflows/ci.yml $BASE/ci.yml
+curl -o .github/workflows/pr.yml $BASE/pr.yml
 curl -o .github/workflows/deploy.yml $BASE/deploy.yml
 
 git add .github/workflows/
