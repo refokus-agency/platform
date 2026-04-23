@@ -1,15 +1,15 @@
-# Custom-code caller — 3 ambientes (preview / stage / production)
-# Copiar este archivo a .github/workflows/ci-cd.yml en el repo de custom-code.
+# Custom-code caller — 3 environments (preview on PRs, stage on push to main, production on push to production).
+# Copy this file to .github/workflows/ci-cd.yml in the custom-code repo.
 
 name: CI + Deploy
 
 on:
   push:
-    branches: ['**']
+    branches: [main, production]
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
 
   deploy-preview:
     needs: ci
-    if: github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/production'
+    if: github.event_name == 'pull_request'
     uses: refokus-agency/platform/.github/workflows/deploy.yml@main
     with:
       environment: preview
