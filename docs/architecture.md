@@ -75,15 +75,30 @@ Two reasons:
 1. **Different project types have different flows.** Custom-code has 3 environments, service has 2. A reusable that encoded "main → stage, production → production" would be wrong for services. A reusable that encoded "main → production" would be wrong for custom-code.
 2. **Callers are cheap to read.** Each caller file declares its trigger in the `on:` block. No indirection to a reusable to figure out what a branch does.
 
+### Why atomic caller files instead of templates per project type?
+
+Earlier iterations grouped caller files by project type (`examples/library/`, `examples/service/`, `examples/custom-code/`). That assumed each type had a single canonical flow shape.
+
+Reality across Refokus repos: shape varies per repo, not per type. Some services have 2 envs, others have 3. Some custom-code sites could use 2 envs if they don't need a client stage gate. A type-based taxonomy fights this variation.
+
+The atomic approach instead: one caller file per (trigger, action) pair, stored flat in `examples/`:
+
+- `pr-ci.yml` — PR → CI
+- `pr-preview.yml` — PR → CI + preview deploy
+- `main-stage.yml` — push main → CI + stage
+- `main-production.yml` — push main → CI + production
+- `production-deploy.yml` — push `production` branch → CI + production
+- `main-release.yml` — push main → CI + semantic-release
+
+Each repo copies the subset matching its actual triggers. No per-type assumption. If a repo has a weird shape (e.g. 4 envs, or a hotfix branch), new atomic files can be added without touching existing ones.
+
+File naming: `<trigger>-<action>`. Keeps the filename readable and predictable — someone skimming a repo's `.github/workflows/` can infer what each file does from its name alone.
+
 ### Why one caller file per trigger instead of one file with conditional jobs?
 
-Earlier iterations had a single caller file per repo (`ci-cd.yml`) with multiple jobs gated by `if: github.event_name == 'push' && github.ref == '...'`. That works, but on every PR the UI shows a "skipped" check for each job that doesn't match the event.
+Splitting per trigger means every file that fires has all its jobs run — no skipped checks cluttering the PR UI. Each file is tiny (10–15 lines) and does exactly one thing.
 
-Splitting into one file per trigger (e.g. custom-code: `pr.yml` on PR, `stage.yml` on main push, `production.yml` on production push) means every file that fires has all its jobs run — no skipped checks cluttering the PR UI. A bit more files per repo, but each one is tiny (10–15 lines) and does exactly one thing.
-
-Libraries get `pr.yml` + `release.yml`. Services get `pr.yml` + `deploy.yml`. Custom-code gets `pr.yml` + `stage.yml` + `production.yml`.
-
-File naming convention: the filename reflects **when** the workflow fires (`pr.yml`, `stage.yml`, `production.yml`, `release.yml`). The `name:` inside matches. Applies uniformly across all project types — no per-type exceptions — so any Refokus repo has predictable workflow filenames.
+An alternative single-file-per-repo with `if: github.event_name == '...'` gates works functionally but shows "skipped" checks in the UI for every non-matching event. The atomic approach trades one file for two or three against a cleaner UX.
 
 ### Why build in both CI and deploy?
 

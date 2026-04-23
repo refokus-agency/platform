@@ -1,5 +1,5 @@
-# Library release — runs CI and semantic-release on push to main.
-# Copy to .github/workflows/release.yml in the library repo.
+# CI + semantic-release on push to main (for npm libraries).
+# Copy to .github/workflows/main-release.yml in your repo.
 
 name: Release
 

@@ -1,11 +1,11 @@
-# Custom-code stage — runs CI and deploys to stage on push to main.
-# Copy to .github/workflows/stage.yml in the custom-code repo.
+# CI + Vercel production deploy on push to production branch (for 3-env Vercel repos).
+# Copy to .github/workflows/production-deploy.yml in your repo.
 
-name: Deploy Stage
+name: Deploy Production
 
 on:
   push:
-    branches: [main]
+    branches: [production]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,9 +16,9 @@ jobs:
     uses: refokus-agency/platform/.github/workflows/ci.yml@main
     secrets: inherit
 
-  deploy-stage:
+  deploy-production:
     needs: ci
     uses: refokus-agency/platform/.github/workflows/deploy.yml@main
     with:
-      environment: stage
+      environment: production
     secrets: inherit

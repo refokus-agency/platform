@@ -1,5 +1,5 @@
-# Library PR workflow — runs CI on pull requests.
-# Copy to .github/workflows/pr.yml in the library repo.
+# CI on pull requests — lint + typecheck + test + build, no deploy.
+# Copy to .github/workflows/pr-ci.yml in your repo.
 
 name: Pull Request
 

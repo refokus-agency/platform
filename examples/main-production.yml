@@ -1,7 +1,7 @@
-# Service deploy — runs CI and deploys to production on push to main.
-# Copy to .github/workflows/deploy.yml in the service repo.
+# CI + Vercel production deploy on push to main (for 2-env Vercel repos).
+# Copy to .github/workflows/main-production.yml in your repo.
 
-name: Deploy
+name: Deploy Production
 
 on:
   push:
