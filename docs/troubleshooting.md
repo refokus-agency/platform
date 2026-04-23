@@ -2,7 +2,7 @@
 
 Common failure modes when using the centralized workflows, and how to fix them.
 
-> **Dependabot PRs fail by default.** This is expected, not a bug. See [dependabot.md](dependabot.md) for the recommended review + rerun flow.
+> **Dependabot PRs failing with `Secret GH_PAT_TOKEN is required, but not provided`?** GitHub blocks Actions secrets for Dependabot-triggered workflows. Solution is to populate the Dependabot secrets store + default `--ignore-scripts`. See [dependabot.md](dependabot.md).
 
 ## CI or deploy doesn't trigger at all
 

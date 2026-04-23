@@ -136,6 +136,16 @@ Pinning to tags is the "correct" thing long-term but wrong for the current phase
 
 We use `@main` while things are changing frequently. When the reusables stabilize (target: 2–3 months without breaking changes), we cut `v1.0.0` and migrate callers to `@v1`. See [contributing.md](contributing.md) for the rollout plan.
 
+### Why does the composite action pass `--ignore-scripts` by default?
+
+Dependency install lifecycle scripts (`postinstall`, `prepare`, etc.) are the primary vector for supply-chain attacks in the npm ecosystem — a compromised package version runs arbitrary code during `npm install` with full env access, which means any secrets set for the workflow are exfiltratable.
+
+Defaulting to `--ignore-scripts` closes this vector in CI at the cost of breaking packages that legitimately need those scripts (native modules like `sharp` or `bcrypt`, binary downloaders like `puppeteer`). The Refokus stack (GSAP / Vite / Next.js / Vercel) doesn't use any of those, so the default works everywhere we migrated.
+
+Repos that do need scripts can opt out with `unsafe-install-scripts: true`. The name intentionally signals the risk.
+
+This default is especially important given we also enable Dependabot secrets (see `docs/dependabot.md`) — without `--ignore-scripts`, populating the Dependabot secrets store re-opens the exact attack surface GitHub's Dependabot-secrets-block was designed to prevent. The two decisions go together.
+
 ### Why does each reusable re-checkout the `platform` repo?
 
 The composite action (`setup`) lives in `platform`. When a reusable runs, the working directory is a checkout of the **caller's** repo — not platform. To use a local composite action path like `./.github/actions/setup`, the reusable needs platform checked out somewhere accessible.

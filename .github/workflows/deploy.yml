@@ -22,6 +22,14 @@ on:
         required: false
         type: string
         default: main
+      unsafe-install-scripts:
+        description: |
+          DANGEROUS — setting to true lets dependencies run postinstall scripts. A compromised
+          dependency can exfiltrate secrets. Default false. Only enable if your project needs
+          postinstall (native modules like sharp, bcrypt, puppeteer).
+        required: false
+        type: boolean
+        default: false
     secrets:
       GH_PAT_TOKEN:
         description: PAT with read:packages for installing from GitHub Packages (@refokus-agency).
@@ -71,6 +79,7 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
+          unsafe-install-scripts: ${{ inputs.unsafe-install-scripts }}
 
       - name: Map environment to Vercel flags
         id: vercel
