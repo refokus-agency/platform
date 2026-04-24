@@ -39,10 +39,6 @@ on:
         required: false
         type: boolean
         default: false
-    secrets:
-      GH_PAT_TOKEN:
-        description: PAT with write:packages + contents:write for publishing and tagging.
-        required: true
 
 jobs:
   publish:
@@ -65,12 +61,11 @@ jobs:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
           path: .platform
-          token: ${{ secrets.GH_PAT_TOKEN }}
 
       - name: Configure npm for GitHub Packages
         run: |
           echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PAT_TOKEN }}" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
           echo "always-auth=true" >> ~/.npmrc
         shell: bash
 
@@ -89,5 +84,5 @@ jobs:
           semantic_version: ${{ inputs.semantic-release-version }}
           extra_plugins: ${{ inputs.extra-plugins }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

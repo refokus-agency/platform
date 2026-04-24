@@ -1,20 +1,17 @@
 # CI on pull requests — lint + typecheck + test + build, no deploy.
 # Copy to .github/workflows/pr-ci.yml in your repo.
-#
-# workflow_dispatch is enabled so that Dependabot PRs (which run without
-# access to secrets automatically) can be re-triggered manually from the
-# Actions tab. A human-initiated dispatch runs with secrets and updates
-# the PR's check status — pair with branch protection requiring this
-# check. See docs/dependabot.md in refokus-agency/platform.
 
 name: Pull Request
 
 on:
   pull_request:
-  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
