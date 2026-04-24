@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest a new input, a new reusable, a new example caller, or a change to an existing one.
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case or the gap in the current workflows. Avoid jumping straight to the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: If you have one in mind. Otherwise leave blank and we'll discuss it.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which part would change?
+      multiple: true
+      options:
+        - Reusable workflow (ci.yml / deploy.yml / release.yml)
+        - Composite action (.github/actions/setup)
+        - Example caller (examples/*.yml)
+        - Documentation (docs/ or README)
+        - New reusable or example
+    validations:
+      required: true
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Would this be a breaking change for existing callers?
+      options:
+        - "No — additive or optional"
+        - "Yes — callers would need to update"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
