@@ -44,7 +44,13 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
 │       └── release.yml         # Reusable: semantic-release to GitHub Packages
-├── examples/                   # Atomic caller workflows, one per trigger
+├── examples/                   # Atomic caller workflows, one per (trigger, action) pair
+│   ├── pr-ci.yml               # PR → CI
+│   ├── pr-preview.yml          # PR → CI + Vercel preview
+│   ├── main-stage.yml          # push main → CI + Vercel stage
+│   ├── main-production.yml     # push main → CI + Vercel production
+│   ├── production-deploy.yml   # push production → CI + Vercel production
+│   └── main-release.yml        # push main → CI + semantic-release
 └── docs/                       # Detailed documentation
 ```
 
@@ -70,4 +76,4 @@ This lets us iterate quickly while the first repos migrate. Once the workflows s
 
 ## Support
 
-Ping `@taprile314` or open an issue on this repo.
+Ping `@taprile314` or `@beogip`, or open an issue on this repo.
