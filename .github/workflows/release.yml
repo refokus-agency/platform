@@ -54,13 +54,13 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout platform repo (for composite actions)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
@@ -83,7 +83,7 @@ jobs:
           unsafe-install-scripts: ${{ inputs.unsafe-install-scripts }}
 
       - name: Semantic release
-        uses: cycjimmy/semantic-release-action@v4
+        uses: cycjimmy/semantic-release-action@v6
         with:
           ci: true
           semantic_version: ${{ inputs.semantic-release-version }}

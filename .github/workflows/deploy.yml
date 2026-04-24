@@ -57,10 +57,10 @@ jobs:
         shell: bash
 
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout platform repo (for composite actions)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
