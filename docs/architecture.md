@@ -144,7 +144,7 @@ Defaulting to `--ignore-scripts` closes this vector in CI at the cost of breakin
 
 Repos that do need scripts can opt out with `unsafe-install-scripts: true`. The name intentionally signals the risk.
 
-This default is especially important given we also enable Dependabot secrets (see `docs/dependabot.md`) — without `--ignore-scripts`, populating the Dependabot secrets store re-opens the exact attack surface GitHub's Dependabot-secrets-block was designed to prevent. The two decisions go together.
+This default is especially important in the Dependabot flow (see `docs/dependabot.md`): even with secrets available (via a human-dispatched run), `--ignore-scripts` ensures a malicious postinstall cannot run during that window. The two decisions go together — the dispatch gate limits *when* secrets are accessible, `--ignore-scripts` limits *what* a dependency can do with them.
 
 ### Why does each reusable re-checkout the `platform` repo?
 
