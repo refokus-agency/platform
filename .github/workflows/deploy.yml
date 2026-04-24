@@ -31,9 +31,6 @@ on:
         type: boolean
         default: false
     secrets:
-      GH_PAT_TOKEN:
-        description: PAT with read:packages for installing from GitHub Packages (@refokus-agency).
-        required: true
       VERCEL_TOKEN:
         required: true
       VERCEL_ORG_ID:
@@ -65,12 +62,11 @@ jobs:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
           path: .platform
-          token: ${{ secrets.GH_PAT_TOKEN }}
 
       - name: Configure npm for GitHub Packages
         run: |
           echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PAT_TOKEN }}" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
         shell: bash
 
       - name: Setup

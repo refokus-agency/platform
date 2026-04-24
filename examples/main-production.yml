@@ -1,8 +1,8 @@
 # CI + Vercel production deploy on push to main (for 2-env Vercel repos).
 # Copy to .github/workflows/main-production.yml in your repo.
 #
-# workflow_dispatch is enabled as an escape hatch — it lets you re-run
-# a production deploy from the Actions tab without pushing a new commit.
+# workflow_dispatch is kept as an escape hatch — lets you re-run a
+# production deploy from the Actions tab without pushing a new commit.
 
 name: Deploy Production
 
@@ -10,6 +10,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
