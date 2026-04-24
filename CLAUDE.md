@@ -43,7 +43,7 @@ These are load-bearing decisions. Don't undo them without reading the rationale 
 
 ## Governance
 
-Two maintainers with merge/release authority: [@taprile314](https://github.com/taprile314) (BDFL, tie-breaker) and [@beogip](https://github.com/beogip). Minor changes (bug fixes, docs, additive inputs) can be merged by either after CI passes. Architectural changes (new reusable, breaking change, composite-action contract changes) need both to agree; if not, BDFL decides. See `GOVERNANCE.md`.
+Two maintainers with equal merge/release authority: [@taprile314](https://github.com/taprile314) and [@beogip](https://github.com/beogip). Minor changes (bug fixes, docs, additive inputs) can be merged by either after CI passes. Architectural changes (new reusable, breaking change, composite-action contract changes) need both to agree. See `GOVERNANCE.md`.
 
 ## Conventional Commits
 
