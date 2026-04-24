@@ -202,7 +202,7 @@ GitHub Actions doesn't have a built-in release workflow for this repo (it's not 
 
 - **Reusables** live in `.github/workflows/`. One file per reusable, named after what it does (`ci.yml`, `deploy.yml`, `release.yml`).
 - **Composite actions** live in `.github/actions/<name>/action.yml`. Each action is a directory; GitHub requires `action.yml` (or `action.yaml`) at that path.
-- **Examples** live in `examples/`. One per project type.
+- **Examples** live in `examples/`. One per (trigger, action) pair, flat — no per-project-type grouping. See [architecture.md](architecture.md#why-atomic-caller-files-instead-of-templates-per-project-type) for the rationale.
 - **Docs** live in `docs/`. Markdown files, cross-linked.
 - **Never** put YAML with secrets, tokens, or project-specific paths in this repo. It's meant to be generic.
 
