@@ -1,0 +1,55 @@
+name: Bug Report
+description: Report a problem with one of the reusable workflows, the setup action, or an example caller.
+labels: [bug, needs-triage]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the repo?
+      options:
+        - Reusable workflow (ci.yml / deploy.yml / release.yml)
+        - Composite action (.github/actions/setup)
+        - Example caller (examples/*.yml)
+        - Documentation (docs/ or README)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: ref
+    attributes:
+      label: Ref used by the caller
+      description: What does your caller workflow point at? (e.g., `@main`, `@v1`, a commit SHA)
+      placeholder: "@main"
+    validations:
+      required: true
+  - type: input
+    id: caller_repo
+    attributes:
+      label: Caller repo (optional)
+      description: If this bug surfaced in a downstream repo, link it here.
+      placeholder: "refokus-agency/example-repo"
+  - type: input
+    id: run_link
+    attributes:
+      label: Link to the failing Actions run (optional)
+      placeholder: "https://github.com/.../actions/runs/..."
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: What happened and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the relevant excerpt from the Actions log. Redact any secrets.
+      render: shell
