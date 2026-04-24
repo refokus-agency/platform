@@ -10,10 +10,10 @@ This is a small project. Governance is intentionally lightweight and will scale 
 ## Decision Making
 
 - **Minor changes** (bug fixes, docs, additive inputs): any maintainer can merge after CI passes.
-- **Architectural changes** (new reusable, breaking change to an existing reusable, changes to the composite action contract): consensus among active maintainers. If there is no consensus, the BDFL has the final vote.
-- **Tie-breaking:** [@taprile314](https://github.com/taprile314) (BDFL) has the final vote.
+- **Architectural changes** (new reusable, breaking change to an existing reusable, changes to the composite action contract): consensus among active maintainers is required.
+- **Tie-breaking:** if maintainers disagree on an architectural change, the change does not land until consensus is reached.
 
-Both maintainers can merge minor changes. Architectural changes need both to agree; if they disagree, the BDFL decides.
+Both maintainers have equal authority. Minor changes can be merged by either. Architectural changes need all active maintainers to agree.
 
 Every caller in the `refokus-agency` org pins its CI/CD at this repo, so treat "minor" and "architectural" through the lens of blast radius rather than diff size. See [`docs/contributing.md`](docs/contributing.md) for how we reason about that.
 
