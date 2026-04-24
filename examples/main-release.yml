@@ -1,11 +1,16 @@
 # CI + semantic-release on push to main (for npm libraries).
 # Copy to .github/workflows/main-release.yml in your repo.
+#
+# workflow_dispatch is enabled as an escape hatch — it lets you re-run
+# a release from the Actions tab without pushing a new commit. Useful
+# for retrying a flaky publish or forcing a re-release.
 
 name: Release
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
