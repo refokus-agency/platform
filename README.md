@@ -70,4 +70,4 @@ This lets us iterate quickly while the first repos migrate. Once the workflows s
 
 ## Support
 
-Ping `@taprile314` or open an issue on this repo.
+Ping `@taprile314` or `@beogip`, or open an issue on this repo.
