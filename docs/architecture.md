@@ -144,7 +144,7 @@ Defaulting to `--ignore-scripts` closes this vector in CI at the cost of breakin
 
 Repos that do need scripts can opt out with `unsafe-install-scripts: true`. The name intentionally signals the risk.
 
-This default is especially important in the Dependabot flow (see `docs/dependabot.md`): even with secrets available (via a human-dispatched run), `--ignore-scripts` ensures a malicious postinstall cannot run during that window. The two decisions go together — the dispatch gate limits *when* secrets are accessible, `--ignore-scripts` limits *what* a dependency can do with them.
+This default is especially important in the Dependabot flow (see `docs/dependabot.md`): Dependabot PRs can trigger CI automatically (with `GITHUB_TOKEN` available), so a compromised dep would otherwise have a window to run install-time code with token access. `--ignore-scripts` closes that window.
 
 ### Why does each reusable re-checkout the `platform` repo?
 
@@ -152,7 +152,26 @@ The composite action (`setup`) lives in `platform`. When a reusable runs, the wo
 
 Each reusable does a secondary checkout of `refokus-agency/platform` into `.platform/`, then references `./.platform/.github/actions/setup`. The `platform-ref` input controls which ref to check out (defaults to `main`, matches the workflow's own ref so they don't drift).
 
+Since `platform` is public, the secondary checkout is anonymous — no token is needed. This was the key change that unblocked Dependabot PRs.
+
 An alternative would be to publish the composite action as a standalone GitHub Action on the marketplace and reference it by name. That's overkill — this one's internal.
+
+### Why is `platform` public?
+
+Two reasons, in order:
+
+1. **Dependabot compatibility.** Custom Actions secrets (like a PAT) are blocked from Dependabot-triggered workflows. Before going public, the reusables required `GH_PAT_TOKEN` to clone this private repo, which broke Dependabot CI runs entirely. Public removes the auth requirement at the checkout step, and the rest of the pipeline uses the always-available `GITHUB_TOKEN`.
+2. **Lower operational overhead.** No PAT to provision, scope, rotate, or audit. The blast radius of a compromised PAT was the whole org's CI/CD; eliminating it is a real risk reduction.
+
+The contents of `platform` are CI/CD configuration (YAML), composite actions, and docs. There are no secrets, no business logic, no client information. Publishing was net-positive on every dimension we looked at.
+
+### Why use `GITHUB_TOKEN` instead of a custom PAT?
+
+`GITHUB_TOKEN` is auto-generated per workflow run, scoped to the repo it runs in, expires when the run ends (~hours), and is the recommended path for any operation GitHub itself supports (clone, GitHub Packages auth, semantic-release tagging).
+
+The only reason we used a custom PAT initially was to clone the private `platform` repo and authenticate against GitHub Packages from inside another repo's workflow. Once `platform` went public, the clone needed no token; for GitHub Packages, `GITHUB_TOKEN` works as long as the caller declares `permissions: packages: read` (or `write` for publishing).
+
+For Dependabot workflows specifically, `GITHUB_TOKEN` is one of the few things still available — they're blocked from custom Actions secrets but not from the built-in token. This is what makes the new design work without a separate Dependabot secrets store or manual dispatch gate.
 
 ## What's out of scope for now
 

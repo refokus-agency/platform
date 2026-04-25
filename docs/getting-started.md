@@ -90,40 +90,18 @@ Your repo needs these secrets available (via org inheritance or repo-level):
 
 | Secret | Needed by | Expected level |
 |---|---|---|
-| `GH_PAT_TOKEN` | all workflows | org |
+| `GITHUB_TOKEN` | all workflows | **automatic** (built-in) |
 | `VERCEL_TOKEN` | `deploy.yml` | org |
 | `VERCEL_ORG_ID` | `deploy.yml` | org |
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** (each project has its own) |
 
-Check under **Settings → Secrets and variables → Actions** in the repo. Anything inherited from the org will show up under "Organization secrets".
+`GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers).
+
+Check the Vercel secrets under **Settings → Secrets and variables → Actions** in the repo. Anything inherited from the org will show up under "Organization secrets".
 
 See [secrets.md](secrets.md) for how to create them.
 
-## 5. Configure branch protection
-
-This step ensures Dependabot PRs can't be merged without a human reviewer explicitly dispatching the workflow (which makes secrets available). Without it, Dependabot PRs would land on a failed check forever.
-
-1. Go to **Settings → Branches → Add rule** (or edit the existing `main` rule).
-2. Set **Branch name pattern** to `main`.
-3. Enable **Require status checks to pass before merging**.
-4. Enable **Require branches to be up to date before merging**.
-5. In the search box, find and select the check produced by your caller. Typical names:
-   - `Pull Request / ci / checks` for repos with `pr-ci.yml` or `pr-preview.yml`.
-   - (The exact name only appears after the workflow has run at least once.)
-6. Save.
-
-For 3-env custom-code repos, repeat for the `production` branch with the corresponding check (`Deploy Production / ...`).
-
-Once configured, Dependabot PRs behave like this:
-
-- Dependabot opens a PR → automatic run fails (no secrets), check appears red.
-- Reviewer reads the diff, then goes to Actions tab → Run workflow → picks the Dependabot branch → dispatches.
-- The dispatched run executes with secrets, succeeds, and updates the check status on the PR commit.
-- Merge unblocks.
-
-See [dependabot.md](dependabot.md) for the rationale and troubleshooting.
-
-## 6. Open a PR and verify
+## 5. Open a PR and verify
 
 ```bash
 git checkout -b test-ci
@@ -142,14 +120,16 @@ For on-push flows (stage, production, release), merge the PR or push to the corr
 
 If something breaks, check [troubleshooting.md](troubleshooting.md).
 
-## 7. (Optional) Verify Dependabot flow
 
-If your repo has Dependabot enabled, the first Dependabot PR is a good test of the manual-dispatch flow. If no Dependabot PRs are pending, you can create a test scenario by:
+## 6. (Optional) Verify Dependabot flow
 
-1. Force-triggering one with `@dependabot recreate` or `@dependabot rebase` on an existing Dependabot PR.
-2. Watching the automatic run fail (expected).
-3. Dispatching the workflow manually from the Actions tab on that branch.
-4. Confirming the check updates and the PR becomes mergeable.
+Dependabot PRs run CI exactly like human PRs in this setup — no special handling required. If you want to confirm the flow on a fresh repo:
+
+1. Wait for or force a Dependabot PR (`@dependabot recreate` or `@dependabot rebase` on an existing one).
+2. Confirm the auto-triggered `ci` check runs and turns green.
+3. If you used `pr-preview.yml`, confirm `deploy-preview` shows as "skipped" for Dependabot PRs (the example caller has `if: github.actor != 'dependabot[bot]'` on that job — Vercel secrets aren't accessible to Dependabot, so we skip the deploy and let CI carry the green check).
+
+See [dependabot.md](dependabot.md) for the full rationale.
 
 ## What happens under the hood
 

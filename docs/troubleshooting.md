@@ -2,7 +2,7 @@
 
 Common failure modes when using the centralized workflows, and how to fix them.
 
-> **Dependabot PRs failing with `Secret GH_PAT_TOKEN is required, but not provided`?** GitHub blocks Actions secrets for Dependabot-triggered workflows. The fix is not to grant Dependabot auto access — it's to require a human to dispatch the workflow from the Actions tab. See [dependabot.md](dependabot.md).
+> **Dependabot PRs failing?** Most likely your caller still references `GH_PAT_TOKEN` or your repo declares it as a required secret. The current platform reusables use `GITHUB_TOKEN` instead — sync your caller from [examples/](../examples/) and you're done. See [dependabot.md](dependabot.md).
 
 ## CI or deploy doesn't trigger at all
 
