@@ -21,6 +21,7 @@ jobs:
 
   deploy-preview:
     needs: ci
+    if: github.actor != 'dependabot[bot]'
     uses: refokus-agency/platform/.github/workflows/deploy.yml@main
     with:
       environment: preview

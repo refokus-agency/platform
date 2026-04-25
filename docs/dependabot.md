@@ -1,116 +1,90 @@
 # Dependabot PRs
 
-How the centralized workflows handle Dependabot-triggered runs, why automatic runs fail, and how the `workflow_dispatch` + required-check pattern unblocks merges after human review.
+How the centralized workflows handle Dependabot-triggered runs.
 
 ## TL;DR
 
-Dependabot-triggered workflows in our setup **fail automatically** because GitHub blocks them from accessing Actions secrets (and our reusables require `GH_PAT_TOKEN` to clone the private `platform` repo). The fix is not to give Dependabot automatic secret access — it is to make the manual re-trigger an explicit, auditable review step.
+**Dependabot PRs run normally — same as human PRs.** No special handling, no manual dispatch, no separate secrets store. The workflow uses `GITHUB_TOKEN` (which Dependabot does have access to, unlike custom Actions secrets), and the reusables in `refokus-agency/platform` are public so no PAT is needed to clone them.
 
-**The flow:**
+The supply-chain attack surface is closed at install time by `--ignore-scripts`, on by default in the composite `setup` action.
 
-1. Dependabot opens a PR. The automatic workflow fails at secrets validation; the check appears as red on the PR.
-2. A reviewer reads the diff (bumps, transitive deps, release notes).
-3. The reviewer dispatches the same workflow manually from the Actions tab, targeting the Dependabot branch. The dispatched run executes as the reviewer (not as Dependabot), so secrets are available.
-4. The dispatched run's check status overwrites the failed one on the same commit SHA.
-5. Branch protection requires that check — the successful dispatch unblocks merge.
+## Why this works
 
-Two defensive layers are always on:
+GitHub blocks **custom Actions secrets** (anything you've defined under Settings → Secrets and variables → Actions) from workflows triggered by Dependabot. The block exists because a malicious dependency could exfiltrate them via lifecycle scripts during install.
 
-- **`--ignore-scripts` by default** in the composite `setup` action, for every install (human PRs included). Closes the install-time supply-chain attack vector regardless of how the workflow was triggered.
-- **Branch protection requiring the check**. Ensures a human cannot merge a Dependabot PR without dispatching the workflow first.
+What the block does NOT cover:
 
-## Why the automatic run fails
+- The auto-generated `GITHUB_TOKEN`, available to every workflow including Dependabot's. It's read-only by default for Dependabot, but you can explicitly request scopes via `permissions:`.
+- Anonymous reads to public repositories (so cloning a public reusable workflow needs no token at all).
+- Reads to GitHub Packages from the same organization, which `GITHUB_TOKEN` can do with `packages: read` granted.
 
-Since February 2021, GitHub blocks Actions secrets for workflows triggered by Dependabot (`github.actor == "dependabot[bot]"`) on `pull_request`, `push`, and related events. The rationale: a malicious dependency could execute code during `npm install` that exfiltrates environment variables.
+By making `refokus-agency/platform` public and using `GITHUB_TOKEN` for everything our reusables need, the Dependabot block becomes irrelevant — there's nothing in our pipeline that requires a custom secret to start.
 
-Our reusable workflows declare `GH_PAT_TOKEN` as `required: true` (needed to clone the private `platform` repo and authenticate `.npmrc` for `@refokus-agency/*` packages). On a Dependabot trigger, `secrets.GH_PAT_TOKEN` resolves to an empty string, failing the pre-run validation with:
+For workflows that genuinely need custom secrets (Vercel deploys, semantic-release publishing), Dependabot's auto-trigger still fails at the `secrets.VERCEL_TOKEN` lookup. Those jobs are gated behind `needs: ci`, so they simply don't run for Dependabot PRs — the CI check still passes (because it doesn't need Vercel), and a human merging the PR triggers the deploy chain. See "Vercel preview deploys" below for the recommended `if:` guard.
 
-```
-Error when evaluating 'secrets'. pr-preview.yml (Line: 15, Col: 11):
-Secret GH_PAT_TOKEN is required, but not provided while calling.
-```
+## Configuration in your repo
 
-The workflow aborts in ~3 seconds without starting a runner. The check appears as failed on the PR.
+If you're consuming the centralized workflows via the `examples/` callers as-is, **there's nothing extra to do**. The provided callers declare the right `permissions:` and reference the public reusables.
 
-## Why manual re-run doesn't work
+If you're authoring a custom caller, the relevant pieces:
 
-An older (2021) GitHub FAQ suggested that re-running a failed Dependabot workflow would grant access to secrets because the actor becomes the human re-runner. **This is no longer true**:
+```yaml
+on:
+  pull_request:
 
-> When you manually re-run a Dependabot workflow, it will run with the same privileges as before even if the user who initiated the rerun has different privileges.
+permissions:
+  contents: read
+  packages: read     # only if your repo installs @refokus-agency/* private packages
 
-Source: [GitHub Docs — Troubleshooting Dependabot on GitHub Actions](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/troubleshooting-dependabot-on-github-actions)
-
-Rerun inherits the original privilege context. For our case, that means the same failure.
-
-## Why `workflow_dispatch` does work
-
-`workflow_dispatch` is a distinct trigger from `pull_request` or `push`. When a human invokes it from the Actions tab, the run's `github.actor` is the human, not Dependabot. GitHub's block on Dependabot secrets does not apply, so the full secrets set is available.
-
-GitHub's status check system tracks the latest status per (commit SHA, check name). When a dispatched run completes for the same commit as the failed automatic run, its status replaces the failed one on the PR. Branch protection then sees a green check and unblocks merge.
-
-## How to dispatch a run
-
-From the repository's **Actions** tab:
-
-1. Select the workflow (e.g., "Pull Request") from the left sidebar.
-2. Click **Run workflow** (top-right of the list view).
-3. From the **Branch** dropdown, select the Dependabot branch (e.g., `dependabot/npm_and_yarn/foo-1.2.3`).
-4. Click **Run workflow** to confirm.
-
-From the CLI:
-
-```bash
-gh workflow run "Pull Request" --repo <org>/<repo> --ref dependabot/npm_and_yarn/foo-1.2.3
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
 ```
 
-The new run appears in the Actions list within a few seconds. When it finishes, the check status on the PR updates.
+`secrets: inherit` is harmless — the reusables don't require any custom secrets for the CI path.
 
-## Branch protection configuration
+## Vercel preview deploys (`pr-preview.yml`)
 
-On every repo consuming the centralized workflows:
+Dependabot can't access `VERCEL_TOKEN`, so the `deploy-preview` job in `pr-preview.yml` would fail validation. The example caller skips that job for Dependabot PRs:
 
-1. **Settings → Branches → Branch protection rules → Add rule** (or edit existing `main` rule).
-2. Enable **Require status checks to pass before merging**.
-3. Search for and select the check(s) produced by the caller workflow. Names typically look like `Pull Request / ci / checks` (derived from `name:` in the caller + `jobs.<key>` + the reusable's inner `jobs.<key>`).
-4. Also enable **Require branches to be up to date before merging** for safety.
+```yaml
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    secrets: inherit
 
-Notes:
+  deploy-preview:
+    needs: ci
+    if: github.actor != 'dependabot[bot]'
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@main
+    with:
+      environment: preview
+    secrets: inherit
+```
 
-- The check name only appears in the search box **after the workflow has run at least once** on a PR or dispatch. For a brand-new repo, dispatch the workflow on `main` once to produce the first run, then configure the rule.
-- For repos with a `production` branch (3-env custom-code), add a similar rule protecting that branch.
-- The manual dispatch remains as an admin-bypass option if a green check is truly unachievable for a given PR (e.g., transient infrastructure failure).
+Result: Dependabot PRs get CI green and `deploy-preview` shows as "skipped" (which counts as passing, not failing). Human PRs run both jobs as usual.
 
-## Defensive layers beyond the gate
+## Defensive layers
 
-### `--ignore-scripts` by default
+What's in place to limit blast radius if a dependency is compromised:
 
-Every install (human PR, Dependabot PR, dispatch) runs with `--ignore-scripts` unless the caller explicitly passes `unsafe-install-scripts: true`. This disables:
+| Layer | What it does |
+|---|---|
+| `--ignore-scripts` (default in `setup`) | Disables `postinstall` / `prepare` / etc. lifecycle scripts. Closes the historical primary attack vector. |
+| Custom Actions secrets blocked for Dependabot | `VERCEL_TOKEN`, etc. are unavailable. Their absence is enforced at the GitHub workflow level — not something the workflow can leak. |
+| `GITHUB_TOKEN` is read-only + scoped + short-lived | If exfiltrated during build/test, an attacker gets repo read + package read for ~2 hours. Cannot write, cannot escape the repo. |
+| Branch protection requiring review | A human must approve the PR before merge, providing a chance to inspect the diff and the bumped package's release notes. |
 
-- `preinstall`, `install`, `postinstall` lifecycle scripts
-- `prepare`, `prepublish`, `prepublishOnly` scripts
+## Residual risk
 
-A malicious dependency's install-time code cannot run. Limits exfiltration even when secrets are in the environment (e.g., during a dispatched run).
+Even with all of the above, code from a compromised dependency can run during the `build` and `test` phases (bundlers and test runners evaluate dep code). During those phases:
 
-### Reviewer discipline
+- It can read environment variables, including `GITHUB_TOKEN`.
+- Exfiltrated `GITHUB_TOKEN` gives read access to the repo and (if granted) `@refokus-agency/*` packages, until it expires.
+- It cannot exfiltrate `VERCEL_TOKEN` or other Actions secrets — those simply aren't in env on Dependabot runs.
 
-The dispatch step is the effective sign-off. Guidance for reviewers:
-
-- Read the diff of `package.json` and lockfile. Look for unexpected transitive bumps.
-- Check the bumped package's release notes (Dependabot embeds them in the PR body).
-- Be cautious of bumps to packages you're not familiar with, especially popular ones with recent maintainer changes.
-- If anything looks off, close the PR instead of dispatching.
-
-## Why not put secrets in the Dependabot secrets store?
-
-GitHub offers an alternative: a separate Dependabot-scoped secrets store at `https://github.com/organizations/<org>/settings/secrets/dependabot`. Secrets there are exposed to Dependabot-triggered workflows automatically, removing the need for manual dispatch.
-
-We chose **not** to use it in Refokus. Reasons:
-
-- **Reviewer discipline is explicit** with the dispatch pattern. The act of clicking "Run workflow" is an audit-loggable event tied to a human. Populating the store makes the grant implicit and permanent.
-- **No secret duplication.** Maintaining two stores means two rotation schedules, two scopes to keep in sync, and two potential exfiltration points.
-- **Low Dependabot volume at Refokus.** One click per PR is not operationally painful for our current repo count. If volume grows significantly, we can revisit.
-
-The store remains a valid fallback. If manual dispatch becomes a bottleneck, enabling it is straightforward: populate the store and remove the required check (or remove `workflow_dispatch` from callers).
+This residual is the same as for any PR (human or bot) that introduces a new dependency. The mitigation is reviewer discipline: when a Dependabot PR shows up, glance at the bumped package's release notes and recent commits before merging.
 
 ## Anti-patterns
 
@@ -128,30 +102,19 @@ jobs:
       - run: pnpm install                                   # exec with secrets
 ```
 
-`pull_request_target` runs in the trusted base-branch context (secrets available), but checking out and installing the PR's code in that context is equivalent to pre-2021 behavior — a malicious postinstall exfiltrates secrets. If you see this pattern in a Refokus repo, flag it.
+`pull_request_target` runs in the trusted base-branch context with secrets available. Checking out the PR's code in that context defeats the entire reason GitHub blocks `pull_request` from secrets. If you see this pattern in a Refokus repo, flag it.
 
-## Troubleshooting
+## What we tried before this approach
 
-### The dispatched run still fails with the secrets error
+For history. Patterns we evaluated and ruled out:
 
-- Confirm you dispatched as a human user, not as a bot or service account.
-- Confirm the dispatched run is a new run (check the run ID), not a rerun of the failed automatic one.
-- If the repo is private and the workflow files reference private reusables, ensure your user has access to the reusable-hosting repo (`platform`).
-
-### The PR check doesn't update after the dispatched run succeeds
-
-- Verify the dispatched run ran on the same commit SHA as the PR's head. If someone pushed to the Dependabot branch after dispatch, the SHAs diverge.
-- Wait up to a minute — GitHub can lag on check status propagation.
-- Ensure the caller workflow's job names (and thus check names) haven't changed between the two runs.
-
-### Required-check name not appearing in branch-protection search
-
-The workflow must have produced at least one check for GitHub to index it. Dispatch the workflow on `main` once, or trigger a PR against a branch that already has the caller file, then retry the search.
+- **Manual rerun of the failed Dependabot workflow.** GitHub used to escalate the rerun's privileges to the human re-running it. They changed this. Reruns now inherit the original Dependabot privilege context. Doesn't work.
+- **Dependabot secrets store.** A separate bucket of secrets specifically exposed to Dependabot-triggered workflows. Functional, but duplicates secrets and adds operational overhead. Made obsolete by the public-platform + `GITHUB_TOKEN` approach.
+- **`workflow_dispatch` + required-check gate.** Add `workflow_dispatch` to the caller, have a reviewer dispatch manually after reading the diff, require the resulting check via Rulesets. **Does not work**: GitHub Rulesets tracks separate check-suites for `pull_request` and `workflow_dispatch` events; the failed auto-run remains "stuck" even after a successful dispatch on the same SHA.
 
 ## References
 
-- [GitHub Docs — Events that trigger workflows: workflow_dispatch](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_dispatch)
 - [GitHub Docs — Automating Dependabot with GitHub Actions](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions)
-- [GitHub Docs — Troubleshooting Dependabot on GitHub Actions](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/troubleshooting-dependabot-on-github-actions)
-- [GitHub Security Lab — Preventing pwn requests](https://securitylab.github.com/research/github-actions-preventing-pwn-requests)
-- Issue refokus-agency/platform#7 — full technical report and alternative approaches considered.
+- [GitHub Docs — Permissions for the GITHUB_TOKEN](https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs)
+- [Carlos Becker — Automerge Dependabot PRs](https://carlosbecker.com/posts/dependabot-automerge/) — pointed us toward `GITHUB_TOKEN` as the path forward
+- Issue [#7](https://github.com/refokus-agency/platform/issues/7) — full investigation log
