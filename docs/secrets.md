@@ -21,7 +21,7 @@ In the caller:
 
 ```yaml
 ci:
-  uses: refokus-agency/platform/.github/workflows/ci.yml@main
+  uses: refokus-agency/platform/.github/workflows/ci.yml@v1
   secrets: inherit   # <- passes all available secrets
 ```
 

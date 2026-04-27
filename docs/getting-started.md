@@ -55,7 +55,7 @@ The examples work out of the box. Tweak only if you need to:
 
   ```yaml
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
     with:
       package-manager: bun
     secrets: inherit
