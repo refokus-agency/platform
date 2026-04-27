@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.1.0](https://github.com/refokus-agency/platform/compare/v1.0.0...v1.1.0) (2026-04-27)
+
+
+### Features
+
+* add release-please automated versioning ([a03a329](https://github.com/refokus-agency/platform/commit/a03a329b3c2c1a5b7e5e99156186d63654381b8f))
+* add release-please automated versioning ([4deb51e](https://github.com/refokus-agency/platform/commit/4deb51e302484f750afe1c140c742d792a4846a2))
+
 ## [1.0.0] — 2026-04-24
 
 Initial tagged release. Stable surface for consumers; callers should reference `@v1`.
