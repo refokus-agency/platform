@@ -23,10 +23,10 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@main
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
     secrets: inherit
 
   release:
     needs: ci
-    uses: refokus-agency/platform/.github/workflows/release.yml@main
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1
     secrets: inherit

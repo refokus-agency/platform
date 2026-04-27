@@ -10,13 +10,14 @@ If you're a consumer of the reusables (you have a caller workflow in your repo),
 
 ## The blast radius
 
-Every repo in the org points its workflows at `refokus-agency/platform@main`. A broken `main` here breaks CI/CD across **all** Refokus projects simultaneously.
+Most repos in the org point their workflows at `refokus-agency/platform@v1` (the floating major tag). A breaking change merged into `main` becomes part of the next release, and once that release is cut, `@v1` moves to it — at which point every consumer picks it up.
 
 Treat this repo accordingly:
 
 - Never push directly to `main`. Always PR.
 - Always test on a branch first (see "Testing changes" below).
 - When in doubt, ask someone to review even trivial changes — a missing backtick in YAML can take everything down.
+- A truly breaking change should not land on `main` casually — it requires a major bump (see [Breaking changes](#breaking-changes)).
 
 ## Development workflow
 
@@ -92,31 +93,25 @@ Useful for testing in isolation, but **remove the `workflow_dispatch` trigger be
 
 ## Versioning
 
-### Current state: `@main`
+Callers reference the floating major tag `@v1`. `@v1` always points at the latest non-breaking release on the v1.x line.
 
-All callers reference `@main`. Changes ship immediately.
+- **Patch / minor changes** (non-breaking): each release moves `@v1` to the new commit. Callers on `@v1` pick it up on their next run.
+- **Breaking changes**: a new major (`v2`) is cut. Callers stay on `@v1` until they explicitly migrate by editing their `uses:` line.
 
-**Advantages:** fast iteration, no per-repo PR to pick up fixes.
+`@main` is still available — useful for testing pre-release changes from a low-stakes consumer, or for repos that want bleeding edge. The vast majority should use `@v1`.
 
-**Disadvantages:** a bad commit to `main` breaks everyone at once. No way for a repo to pin to a known-good version.
+### How releases work
 
-This is the right tradeoff *while everyone's migrating*. It's not the right tradeoff long-term.
+Releases are automated by [release-please](https://github.com/googleapis/release-please-action) on every push to `main`:
 
-### Transitioning to tags
+1. Commits on `main` use [conventional commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, etc., with `feat!:` or a `BREAKING CHANGE:` footer for breaking changes).
+2. Release-please opens (or updates) a pending **release PR** that aggregates all unreleased commits, calculates the next semver bump from the conventional commit types, and updates `CHANGELOG.md`.
+3. When you merge the release PR, release-please:
+   - Tags the merge commit (`v1.2.3`).
+   - Creates a GitHub Release.
+   - The `release-please.yml` workflow's follow-up job force-moves `v1` to the same commit, so consumers on `@v1` pick up the change.
 
-Once the reusables have been stable for 2–3 months with no breaking changes, we move to tagged versions:
-
-1. Cut a `v1.0.0` tag on `main` (`git tag v1.0.0 && git push --tags`).
-2. Also create a moving `v1` tag that always points at the latest compatible release (`git tag -f v1 && git push --tags --force`).
-3. Update the examples in `platform` to use `@v1` instead of `@main`.
-4. PR each consumer repo to point at `@v1`.
-
-After the transition:
-
-- **Patch / minor changes** (non-breaking): update `v1` to point at the new commit. Callers on `@v1` pick it up automatically.
-- **Breaking changes**: cut `v2.0.0`, create `v2` tag. Callers stay on `@v1` until they explicitly migrate.
-
-`@main` stays useful for testing new changes — a repo that wants bleeding edge can pin to `@main`, everyone else stays on `@v1`.
+Two visible artifacts: the **release PR** (your gate to cut the version when you want) and the **GitHub Release** (after merge, with changelog).
 
 ## Breaking changes
 
@@ -129,15 +124,12 @@ A change is **breaking** if it:
 
 For breaking changes:
 
-1. Don't merge it to `main` if callers are on `@main` — it'll break everyone.
-2. Instead, wait until we've transitioned to tags, then cut a new major version.
-3. Document the migration path in this repo (add a `docs/migrations/v1-to-v2.md` or similar).
+1. Use a `feat!:` prefix or include a `BREAKING CHANGE:` footer in the commit. Release-please picks this up and cuts a major bump (`v1.x.y` → `v2.0.0`) on the next release PR.
+2. Document the migration path in `docs/migrations/v1-to-v2.md` (or similar).
+3. Announce in the team channel before merging the release PR — once `v2` exists, `@v1` stops moving and consumers stay on the old line until they migrate explicitly.
+4. Update `examples/` in this repo to point at `@v2` so new repos start on the current major.
 
-While we're on `@main`, avoid breaking changes. If one is unavoidable:
-
-- Announce it in the team channel with a date.
-- Add a deprecation notice in the reusable logs (`echo "::warning::..."`).
-- Coordinate the rollout across repos.
+Note: callers on `@v1` are *not* broken when `v2` is cut — they keep getting v1.x updates. They only break if they actively change to `@v2` and don't migrate their config.
 
 ## Adding a new input
 
@@ -184,19 +176,16 @@ PRs to this repo should get:
 - **Explicit confirmation** that the change was tested (Option A above, ideally).
 - **A clear commit message** once squashed. The squash message becomes the commit on `main`; keep it useful for `git log` / `git blame` spelunking later.
 
-## Releasing (once we're on tags)
+## Releasing
 
-From `main` after PR merge:
+Releases are fully automated. To cut one:
 
-```bash
-git checkout main && git pull
-# For a new minor or patch:
-git tag v1.2.3
-git tag -f v1           # move the moving tag
-git push --tags --force
-```
+1. Land your conventional-commit PRs on `main` as usual.
+2. Release-please will (re)open a PR titled something like `chore(main): release 1.2.3`. Review the proposed CHANGELOG and version.
+3. Merge the release PR. The `release-please.yml` workflow tags `v1.2.3`, creates the GitHub Release, and force-moves `v1` to the same commit.
+4. Verify on the Tags page that `v1` now points at the new commit. Consumers on `@v1` pick it up automatically on their next run.
 
-GitHub Actions doesn't have a built-in release workflow for this repo (it's not a package; no semver enforcement tooling applies). Just keep it simple and disciplined.
+You don't tag manually. If something looks off in the release PR (wrong version, missing entries), check that the underlying commit messages used the right conventional-commit types.
 
 ## File structure conventions
 
