@@ -127,14 +127,21 @@ would be noisy and easy to miss when adding a new secret. `secrets: inherit` for
 
 The reusable declares which secrets are `required: true`, so a missing one fails with a clear error.
 
-### Why `@main` instead of `@v1`?
+### Versioning with release-please
 
-Pinning to tags is the "correct" thing long-term but wrong for the current phase:
+Callers reference the floating major tag `@v1`. Releases are automated by [release-please](https://github.com/googleapis/release-please-action):
 
-- We're actively iterating. Every fix would need a new tag + bump in every caller repo. That's 10+ PRs per change.
-- No repo depends on stability yet — everyone's migrating.
+1. Conventional commits land on `main` (`feat:`, `fix:`, `chore:`, etc., with `feat!:` or `BREAKING CHANGE:` footer for breakers).
+2. release-please opens or updates a release PR aggregating unreleased commits, computing the next semver bump, and updating `CHANGELOG.md`.
+3. Merging the release PR tags the new version (`v1.x.y`), creates a GitHub Release, and the `release-please.yml` workflow force-moves `@v1` to the same commit.
 
-We use `@main` while things are changing frequently. When the reusables stabilize (target: 2–3 months without breaking changes), we cut `v1.0.0` and migrate callers to `@v1`. See [contributing.md](contributing.md) for the rollout plan.
+Why a floating `@v1` instead of pinned `@v1.2.3` per caller?
+
+- One tag to update means non-breaking improvements propagate without 10+ PRs per fix.
+- Breaking changes go to a new major (`@v2`); callers stay on `@v1` until they explicitly migrate.
+- Repos that want bleeding-edge can still use `@main`; SHA pins (`@<sha>`) work for paranoid scenarios.
+
+The `v1.0.0` tag was bootstrapped manually on the first stable `main` HEAD; from `v1.1.0` onward release-please owns the process. The floating `@v1` is force-pushed on every release — that's the only place `--force` is acceptable.
 
 ### Why does the composite action pass `--ignore-scripts` by default?
 

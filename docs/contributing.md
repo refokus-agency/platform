@@ -53,7 +53,7 @@ PR description should cover:
 
 ### 5. Merge
 
-After review, squash-merge into `main`. Callers pinned at `@main` pick it up on their next run.
+After review, squash-merge into `main`. The merge becomes part of the next release-please release PR; once that PR is merged, `@v1` moves to the new commit and consumers pick it up on their next run.
 
 ## Testing changes
 
@@ -70,7 +70,7 @@ You can't test a reusable workflow by "running" it — it only runs when called.
 
 3. Push a commit to trigger the caller.
 4. Watch the run. Iterate.
-5. Once happy, revert the test repo to `@main`, merge your PR into `platform`.
+5. Once happy, revert the test repo to `@v1`, merge your PR into `platform`.
 
 This is the most realistic test — it exercises the actual caller → reusable path.
 
