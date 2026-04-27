@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-This repo's reusable workflows are referenced by callers via ref (`@main` today, `@v1` once tags are cut). We support the latest version of each major line.
+This repo's reusable workflows are referenced by callers via ref. The supported pin is `@v1` (the floating major tag); `@main` is supported as the bleeding-edge development line. We support the latest release on each major line.
 
-| Version | Supported |
-| ------- | --------- |
-| `main`  | Yes — current development line |
-| `@v1.x` | Yes — once released |
-| `< v1`  | No        |
+| Version  | Supported |
+| -------- | --------- |
+| `@v1`    | Yes — latest v1.x release (recommended for consumers) |
+| `@main`  | Yes — current development line |
+| `< v1`   | N/A — no pre-v1 releases shipped |
 
 ## Reporting a Vulnerability
 
