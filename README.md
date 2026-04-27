@@ -66,13 +66,17 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 
 ## Versioning
 
-Callers currently reference `@main`:
+Callers reference the floating major tag `@v1`:
 
 ```yaml
-uses: refokus-agency/platform/.github/workflows/ci.yml@main
+uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
 ```
 
-This lets us iterate quickly while the first repos migrate. Once the workflows stabilize (target: 2–3 months without breaking changes), we'll cut `@v1` tags and migrate callers to pinned versions. See [docs/contributing.md](docs/contributing.md) for details.
+`@v1` always points at the latest non-breaking release on the v1.x line, so callers pick up patches and minors automatically without per-repo PRs. Breaking changes cut a new major (`v2`), and callers stay on `@v1` until they explicitly migrate.
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please-action) — conventional commits on `main` open a release PR, merging it cuts the tag and moves `@v1`. For day-to-day maintenance and the breaking-change protocol, see [docs/contributing.md](docs/contributing.md).
+
+`@main` stays available for testing pre-release changes; `@<sha>` works for paranoid pinning. Most repos should just use `@v1`.
 
 ## Support
 

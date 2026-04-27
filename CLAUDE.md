@@ -15,12 +15,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Blast radius — read before editing
 
-Every consumer repo pins `uses: refokus-agency/platform/.github/workflows/<x>.yml@main`. **A broken commit on `main` breaks CI/CD across every Refokus project simultaneously.** Consequences for how to work here:
+Most consumer repos pin `uses: refokus-agency/platform/.github/workflows/<x>.yml@v1` (the floating major tag). The `v1` tag is force-moved to every new release on the v1.x line, so anything merged to `main` and then released propagates to all consumers automatically. **A broken release on the v1.x line breaks CI/CD across every Refokus project simultaneously.** Consequences for how to work here:
 
 - Never commit directly to `main`. PR only.
 - You cannot "run" a reusable workflow locally or in this repo — it only executes when a caller invokes it. To test a change, push your branch, then temporarily point a low-stakes caller repo at `refokus-agency/platform/...@your-branch` and watch the run. `act` catches syntax errors but doesn't reliably exercise secrets or composite actions.
-- Breaking changes (removing/renaming an input, changing an input default's behavior, adding a `required` input/secret, changing semantics) must not land on `main` while callers are pinned at `@main`. Prefer additive, default-preserving changes. See `docs/contributing.md` for the full checklist.
-- Current versioning strategy is `@main` for fast iteration. The plan is to cut `v1` tags once the reusables sit stable for 2–3 months (see `docs/architecture.md` → "Why `@main` instead of `@v1`").
+- Breaking changes (removing/renaming an input, changing an input default's behavior, adding a `required` input/secret, changing semantics) must use `feat!:` or a `BREAKING CHANGE:` footer so release-please cuts a new major (`v2`). Prefer additive, default-preserving changes that fit on the v1.x line. See `docs/contributing.md` for the full checklist.
+- Releases are automated by [release-please](https://github.com/googleapis/release-please-action) on every push to `main`. Conventional commits open/update a release PR; merging the release PR tags the new version, creates a GitHub Release, and force-moves `@v1`. Configuration: `release-please-config.json`, `.release-please-manifest.json`, `.github/workflows/release-please.yml`. See `docs/architecture.md` → "Versioning with release-please".
 
 ## Invariants to preserve
 
