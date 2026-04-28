@@ -10,6 +10,8 @@ What secrets the reusables need, where they should live, and how to configure th
 | `VERCEL_TOKEN` | `deploy.yml` | **org** | Vercel personal or org-scoped token |
 | `VERCEL_ORG_ID` | `deploy.yml` | **org** | Same across all Refokus Vercel projects |
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** | Unique per Vercel project |
+| `RELEASE_APP_ID` | `release.yml` | **org or repo** | Optional. GitHub App ID for branch-protection bypass on `main`. Required when using `@semantic-release/git` against a branch with a "PRs required" ruleset. |
+| `RELEASE_APP_PRIVATE_KEY` | `release.yml` | **org or repo** | Optional. PEM private key paired with `RELEASE_APP_ID`. |
 
 `GITHUB_TOKEN` covers what we used to need a PAT for: cloning the public `refokus-agency/platform` reusables (no auth needed for public repos), authenticating `.npmrc` for `@refokus-agency/*` packages on GitHub Packages, and tagging/publishing in `release.yml`. The caller declares the scopes via `permissions:` (`contents`, `packages`).
 
@@ -91,6 +93,33 @@ Unique per Vercel project. Configured **per repo**.
 3. Go to the repo's Actions secrets and add it as `VERCEL_PROJECT_ID`.
 
 You can also find the project ID in the Vercel dashboard: Project → Settings → General → "Project ID".
+
+## Release bypass with a GitHub App
+
+`release.yml` runs `semantic-release`, which by default uses `@semantic-release/git` to push a commit (CHANGELOG, version bump) back to `main`. The built-in `GITHUB_TOKEN` cannot push to `main` if the branch is protected by a ruleset that requires PRs — pushes are rejected with `GH013: Repository rule violations found`.
+
+The fix is to mint a short-lived token from a GitHub App that is on the ruleset's bypass list, and use that token for `semantic-release`. This is scoped to the release job only — Dependabot PR runs use `pull_request` workflows that don't touch this token, so this setup doesn't reintroduce the secret-exposure pattern that pushed the project off PATs.
+
+### Setup
+
+1. **Create a GitHub App** at the org level: `https://github.com/organizations/refokus-agency/settings/apps/new`.
+   - Repository permissions: `contents: read and write`, `issues: read and write`, `pull-requests: read and write`, `metadata: read`.
+   - Webhook: disabled.
+   - Where can be installed: **Only this account** (`refokus-agency`).
+2. **Generate a private key** (`.pem`) on the app's settings page and download it.
+3. **Install the app** on the repos that need release bypass.
+4. **Add the app to the bypass list** of the org-level ruleset on `main`: `https://github.com/organizations/refokus-agency/settings/rules` → ruleset → Bypass list → Add bypass → select the app → mode "Always". Requires org-owner permissions.
+5. **Set the secrets** on the repo (or org level if you want to share the app across many repos):
+   ```bash
+   gh secret set RELEASE_APP_ID --repo <owner>/<repo> --body "<app-id>"
+   gh secret set RELEASE_APP_PRIVATE_KEY --repo <owner>/<repo> < path/to/key.pem
+   ```
+   On Windows / PowerShell:
+   ```powershell
+   Get-Content path/to/key.pem -Raw | gh secret set RELEASE_APP_PRIVATE_KEY --repo <owner>/<repo>
+   ```
+
+If both secrets are present when `release.yml` runs, the job mints an installation token and uses it as `GITHUB_TOKEN` for `semantic-release`. If either is missing, the job falls back to the built-in `GITHUB_TOKEN` — fine for repos without branch protection or that don't use `@semantic-release/git`.
 
 ## Rotating secrets
 
