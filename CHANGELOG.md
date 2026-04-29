@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.2.1](https://github.com/refokus-agency/platform/compare/v1.2.0...v1.2.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* **release:** use job-level env to gate app-token step ([#18](https://github.com/refokus-agency/platform/issues/18)) ([ad158a2](https://github.com/refokus-agency/platform/commit/ad158a22b68c36036f5803d06e483ce4d3685c8e))
+
 ## [1.2.0](https://github.com/refokus-agency/platform/compare/v1.1.0...v1.2.0) (2026-04-29)
 
 
