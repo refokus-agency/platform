@@ -102,6 +102,24 @@ Common failure modes when using the centralized workflows, and how to fix them.
 - Verify `.releaserc` (or `release` key in `package.json`) exists and configures the GitHub Packages plugin.
 - Check the logs — semantic-release is verbose about why it didn't release.
 
+## Semantic-release fails with "GH013: Repository rule violations found"
+
+**Symptoms:** the release job fails at the `prepare` step of `@semantic-release/git` with:
+
+```
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+- Changes must be made through a pull request.
+```
+
+**Cause:** `@semantic-release/git` tries to push the version-bump + CHANGELOG commit directly to `main`, but the branch is protected by a ruleset that requires PRs. The built-in `GITHUB_TOKEN` cannot bypass that ruleset.
+
+**Fix:** configure a GitHub App with branch-protection bypass and pass its credentials to the release job. See [secrets.md → Release bypass with a GitHub App](secrets.md#release-bypass-with-a-github-app) for the full setup.
+
+If you don't want to set up a GitHub App, two alternatives:
+
+- Remove `@semantic-release/git` from the plugins list in `.releaserc.json`. The release still creates a tag, GitHub Release, and publishes the package — only the version-bump commit and CHANGELOG.md aren't pushed back to the repo.
+- Switch to `release-please` (PR-based, no direct push to `main`). `platform` itself uses release-please for the same reason.
+
 ## Caching seems ineffective
 
 **Symptoms:** every run re-downloads all dependencies.
