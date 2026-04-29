@@ -62,10 +62,12 @@ jobs:
       packages: write
       issues: write
       pull-requests: write
+    env:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
     steps:
       - name: Mint release token (GitHub App)
         id: app-token
-        if: ${{ secrets.RELEASE_APP_ID != '' }}
+        if: env.RELEASE_APP_ID != ''
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
