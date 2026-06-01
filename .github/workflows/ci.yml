@@ -46,11 +46,36 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      PACKAGE_CONSUMER_APP_ID:
+        description: |
+          GitHub App ID used to mint a short-lived token with `Packages: Read` over
+          the `refokus-agency` org. Required to install private `@refokus-agency/*`
+          packages from GitHub Packages. Optional; if unset, the job falls back to
+          the built-in GITHUB_TOKEN (which only grants per-repo access and fails
+          for packages not explicitly authorized on this repo).
+        required: false
+      PACKAGE_CONSUMER_PRIVATE_KEY:
+        description: |
+          PEM private key for the GitHub App referenced by PACKAGE_CONSUMER_APP_ID.
+          Required if PACKAGE_CONSUMER_APP_ID is set.
+        required: false
 
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      PACKAGE_CONSUMER_APP_ID: ${{ secrets.PACKAGE_CONSUMER_APP_ID }}
     steps:
+      - name: Mint Package Consumer token (GitHub App)
+        id: app-token
+        if: env.PACKAGE_CONSUMER_APP_ID != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.PACKAGE_CONSUMER_APP_ID }}
+          private-key: ${{ secrets.PACKAGE_CONSUMER_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Checkout caller repo
         uses: actions/checkout@v4
 
@@ -64,7 +89,7 @@ jobs:
       - name: Configure npm for GitHub Packages
         run: |
           echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}" >> ~/.npmrc
         shell: bash
 
       - name: Setup
