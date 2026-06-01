@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.3.1](https://github.com/refokus-agency/platform/compare/v1.3.0...v1.3.1) (2026-06-01)
+
+
+### Reverts
+
+* **ci:** drop GitHub App token for private package reads ([04d2a4d](https://github.com/refokus-agency/platform/commit/04d2a4dddad44b641c36a2b45589c279639cd00e))
+* **ci:** drop GitHub App token for private package reads ([babdd38](https://github.com/refokus-agency/platform/commit/babdd381473329c2a042f60e9075b0c951788e6e))
+
 ## [1.3.0](https://github.com/refokus-agency/platform/compare/v1.2.1...v1.3.0) (2026-06-01)
 
 
