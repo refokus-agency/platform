@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.3.0](https://github.com/refokus-agency/platform/compare/v1.2.1...v1.3.0) (2026-06-01)
+
+
+### Features
+
+* **ci:** mint Package Consumer App token to read private packages ([e8df169](https://github.com/refokus-agency/platform/commit/e8df169757760f42981b6133c52078ae20b6f94d))
+* **ci:** mint Package Consumer App token to read private packages ([bfb0758](https://github.com/refokus-agency/platform/commit/bfb0758df2f7c45a6833fe111a131b347db5a1cc))
+
 ## [1.2.1](https://github.com/refokus-agency/platform/compare/v1.2.0...v1.2.1) (2026-04-29)
 
 
