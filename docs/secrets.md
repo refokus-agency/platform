@@ -121,6 +121,34 @@ The fix is to mint a short-lived token from a GitHub App that is on the ruleset'
 
 If both secrets are present when `release.yml` runs, the job mints an installation token and uses it as `GITHUB_TOKEN` for `semantic-release`. If either is missing, the job falls back to the built-in `GITHUB_TOKEN` — fine for repos without branch protection or that don't use `@semantic-release/git`.
 
+## Publishing to public npm via OIDC Trusted Publishing
+
+When `release.yml` is called with `registry: npm`, it publishes to the public npm registry (registry.npmjs.org) using **OIDC Trusted Publishing** — there is **no `NPM_TOKEN` or any static npm secret**. The runner mints a short-lived GitHub OIDC token and npm exchanges it for a one-time publish credential. This is why the npm path adds no row to the secrets table above.
+
+Two things are required for it to work:
+
+1. **`permissions: id-token: write` in the caller.** This is what allows the OIDC token to be minted. The [`main-release-npm.yml`](../examples/main-release-npm.yml) example includes it. Without it the publish fails with an auth error.
+2. **A Trusted Publisher configured on npmjs.org**, per package. On npmjs.com go to the package → **Settings → Trusted Publisher → GitHub Actions** and set:
+   - **Organization or user:** `refokus-agency`
+   - **Repository:** the caller repo name (e.g. `navigation`)
+   - **Workflow filename:** `release.yml` — the reusable runs `npm publish` from this file, and npm matches the OIDC token's `job_workflow_ref` against it. This must match exactly.
+   - **Environment:** leave blank unless your caller job targets a named environment.
+
+You also need to make sure the package routes its **publish** to npm, not back to GitHub Packages:
+
+- **`publishConfig.registry` must not point at GitHub Packages.** `publishConfig.registry` in `package.json` takes precedence over every other config (env vars, `.npmrc`, the workflow), so a leftover `"publishConfig": { "registry": "https://npm.pkg.github.com" }` from a GitHub Packages setup will silently send the OIDC publish to the wrong registry and fail. For the `npm` path, set it explicitly (or omit it — a scoped package defaults to npm when no scope registry is configured):
+  ```json
+  "publishConfig": { "registry": "https://registry.npmjs.org", "access": "public" }
+  ```
+
+Notes:
+
+- The package name must already exist on npm, or the publishing identity must be allowed to create it. The Trusted Publisher config must exist **before** the first OIDC publish.
+- `NODE_AUTH_TOKEN` is intentionally **not** set on this path. If it is present, npm skips the OIDC exchange and tries a static token instead.
+- **Provenance** (`provenance: true`) requires a **public** repository. Leave it off (the default) while the caller repo is private, or the publish fails. Note that `provenance` only controls `NPM_CONFIG_PROVENANCE`; if your `.releaserc` (or `package.json` `release` config) sets `npmProvenance: true` inside the `@semantic-release/npm` plugin, that overrides the input — remove it and use the `provenance` input instead.
+- **Private dependencies:** the `npm` path does **not** write GitHub Packages auth to `~/.npmrc`, so it can only install dependencies that are publicly resolvable. If your package depends on private `@refokus-agency/*` packages hosted on GitHub Packages, the install step will fail — open an issue on `platform` if you hit this; it needs a deliberate fix (install auth for one scope while publishing under it to a different registry is a non-trivial combination).
+- `GITHUB_TOKEN` is still used on this path — not for npm auth, but for creating the GitHub Release, tagging, and the `@semantic-release/git` push. The optional `RELEASE_APP_*` bypass works the same as on the GitHub Packages path.
+
 ## Rotating secrets
 
 When a Vercel token expires or is compromised:

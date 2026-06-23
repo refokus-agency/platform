@@ -38,7 +38,12 @@ Deploys to Vercel at a specific environment (`preview`, `stage`, or `production`
 
 ### Reusable workflow: `release.yml`
 
-Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing to GitHub Packages.
+Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing. The publish target is selected by the `registry` input:
+
+- `registry: github-packages` (default) — publishes `@refokus-agency/*` packages to GitHub Packages, authenticated with the built-in `GITHUB_TOKEN`. This is the original behavior; existing callers need no change.
+- `registry: npm` — publishes to the public npm registry (registry.npmjs.org) via **OIDC Trusted Publishing**. No `NPM_TOKEN` is used: the job declares `id-token: write`, and npm exchanges the GitHub OIDC token for a short-lived publish credential. Two supporting inputs apply on this path only: `npm-version` (the workflow guarantees npm ≥ this value before publishing, because OIDC Trusted Publishing requires npm ≥ 11.5.1, newer than the npm bundled with older Node releases) and `provenance` (default `false`; set to `true` only when the caller repo is **public**, since npm provenance attestation requires a public repository).
+
+The two paths are conditional steps inside the same `publish` job, so `npm publish` always runs from `release.yml` — that is the workflow filename consumers register in their npmjs.org Trusted Publisher config. On the npm path `NODE_AUTH_TOKEN` is deliberately left unset; if it were set, npm would skip the OIDC exchange. See [secrets.md](secrets.md) for the npmjs.org Trusted Publisher setup.
 
 ### Callers
 
@@ -185,7 +190,6 @@ For Dependabot workflows specifically, `GITHUB_TOKEN` is one of the few things s
 These came up in the design discussion and were explicitly deferred:
 
 - **Artifact-based build sharing** (`vercel build --prebuilt`). Add later if duplication hurts.
-- **Public npm publishing.** Libraries publish to GitHub Packages. If a lib ever needs npm public, add a `registry` input.
 - **A shared "scripts" project type.** Doesn't exist yet. If one appears, it can reuse `ci.yml` with nothing new.
 - **Notification integrations** (Slack on deploy, etc.). Not in scope for v1.
 - **Dependabot config distribution.** Dependabot rules live per repo. Centralizing is a separate project.

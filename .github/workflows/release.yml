@@ -39,6 +39,33 @@ on:
         required: false
         type: boolean
         default: false
+      registry:
+        description: |
+          Target registry for the publish. `github-packages` (default) keeps the existing
+          GitHub Packages behavior. `npm` publishes to the public npm registry
+          (registry.npmjs.org) via OIDC Trusted Publishing — no NPM_TOKEN required, but the
+          package must have a Trusted Publisher configured on npmjs.org pointing at this
+          workflow (release.yml), and the caller must grant `permissions: id-token: write`.
+        required: false
+        type: string
+        default: github-packages
+      npm-version:
+        description: |
+          npm CLI version to guarantee before publishing on the `npm` registry path. OIDC
+          Trusted Publishing requires npm >= 11.5.1. The default tracks the npm bundled with
+          the current Node LTS. Only installed when the runner's npm is older than this value;
+          unused on the GitHub Packages path.
+        required: false
+        type: string
+        default: 11.6.2
+      provenance:
+        description: |
+          Generate npm provenance attestation on the `npm` registry path. Default false.
+          Provenance requires a PUBLIC repository — leave false while the caller repo is
+          private or the publish will fail. Ignored on the GitHub Packages path.
+        required: false
+        type: boolean
+        default: false
     secrets:
       RELEASE_APP_ID:
         description: |
@@ -62,9 +89,32 @@ jobs:
       packages: write
       issues: write
       pull-requests: write
+      # Required for OIDC Trusted Publishing on the `npm` registry path. Permissions are
+      # job-level only, so it's declared unconditionally; the GitHub Packages path simply
+      # never requests an OIDC token. Callers using `registry: npm` MUST also grant
+      # `id-token: write` in their own caller workflow — without it the OIDC exchange fails
+      # at runtime (GitHub never delegates a permission the caller didn't grant).
+      id-token: write
     env:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
     steps:
+      - name: Validate inputs
+        run: |
+          case '${{ inputs.registry }}' in
+            github-packages|npm) ;;
+            *)
+              echo "::error::Unknown registry '${{ inputs.registry }}'. Must be 'github-packages' or 'npm'."
+              exit 1
+              ;;
+          esac
+          if [ '${{ inputs.registry }}' = 'npm' ]; then
+            if ! printf '%s' '${{ inputs.npm-version }}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::npm-version must be a stable semver (X.Y.Z); got '${{ inputs.npm-version }}'."
+              exit 1
+            fi
+          fi
+        shell: bash
+
       - name: Mint release token (GitHub App)
         id: app-token
         if: env.RELEASE_APP_ID != ''
@@ -87,6 +137,7 @@ jobs:
           path: .platform
 
       - name: Configure npm for GitHub Packages
+        if: inputs.registry == 'github-packages'
         run: |
           echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
@@ -101,7 +152,23 @@ jobs:
           package-manager: ${{ inputs.package-manager }}
           unsafe-install-scripts: ${{ inputs.unsafe-install-scripts }}
 
-      - name: Semantic release
+      - name: Ensure npm supports OIDC Trusted Publishing
+        if: inputs.registry == 'npm'
+        run: |
+          required='${{ inputs.npm-version }}'
+          current="$(npm -v)"
+          lowest="$(printf '%s\n%s\n' "$current" "$required" | sort -V | head -n1)"
+          if [ "$lowest" = "$required" ]; then
+            echo "npm $current already satisfies >= $required"
+          else
+            echo "npm $current is older than $required — installing npm@$required"
+            npm install -g "npm@$required"
+          fi
+          npm -v
+        shell: bash
+
+      - name: Semantic release (GitHub Packages)
+        if: inputs.registry == 'github-packages'
         uses: cycjimmy/semantic-release-action@v4
         with:
           ci: true
@@ -109,4 +176,19 @@ jobs:
           extra_plugins: ${{ inputs.extra-plugins }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      # Public npm path: authenticate via OIDC Trusted Publishing. NODE_AUTH_TOKEN is
+      # deliberately NOT set — if it were, npm would skip the OIDC exchange and try the
+      # (nonexistent) static token. GITHUB_TOKEN is still needed for the GitHub release,
+      # tagging and the @semantic-release/git push.
+      - name: Semantic release (public npm via OIDC)
+        if: inputs.registry == 'npm'
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          ci: true
+          semantic_version: ${{ inputs.semantic-release-version }}
+          extra_plugins: ${{ inputs.extra-plugins }}
+        env:
+          NPM_CONFIG_PROVENANCE: ${{ inputs.provenance }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
