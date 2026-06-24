@@ -20,12 +20,14 @@ Pick the workflow files that match **the triggers your repo cares about** and co
 | [`main-production.yml`](examples/main-production.yml) | push to `main` | CI + Vercel production deploy |
 | [`production-deploy.yml`](examples/production-deploy.yml) | push to `production` | CI + Vercel production deploy |
 | [`main-release.yml`](examples/main-release.yml) | push to `main` | CI + semantic-release to GitHub Packages |
+| [`main-release-npm.yml`](examples/main-release-npm.yml) | push to `main` | CI + semantic-release to public npm via OIDC Trusted Publishing |
 
 ### Common shapes
 
 | Your repo is… | Copy these |
 |---|---|
 | An npm library (release to GH Packages) | `pr-ci.yml` + `main-release.yml` |
+| An npm library (release to public npm) | `pr-ci.yml` + `main-release-npm.yml` — needs `id-token: write` and a Trusted Publisher on npmjs.org; see [docs/secrets.md](docs/secrets.md) |
 | A Vercel-deployed app, 2 envs (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
 | A Vercel-deployed app, 3 envs (preview on PR, stage on main, prod on a `production` branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
 
@@ -43,14 +45,15 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │   └── workflows/
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
-│       └── release.yml         # Reusable: semantic-release to GitHub Packages
+│       └── release.yml         # Reusable: semantic-release (GitHub Packages or public npm via OIDC)
 ├── examples/                   # Atomic caller workflows, one per (trigger, action) pair
 │   ├── pr-ci.yml               # PR → CI
 │   ├── pr-preview.yml          # PR → CI + Vercel preview
 │   ├── main-stage.yml          # push main → CI + Vercel stage
 │   ├── main-production.yml     # push main → CI + Vercel production
 │   ├── production-deploy.yml   # push production → CI + Vercel production
-│   └── main-release.yml        # push main → CI + semantic-release
+│   ├── main-release.yml        # push main → CI + semantic-release (GitHub Packages)
+│   └── main-release-npm.yml    # push main → CI + semantic-release (public npm via OIDC)
 └── docs/                       # Detailed documentation
 ```
 

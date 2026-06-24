@@ -1,0 +1,55 @@
+# CI + semantic-release on push to main, publishing to the PUBLIC npm registry
+# (registry.npmjs.org) via OIDC Trusted Publishing.
+# Copy to .github/workflows/main-release.yml in your repo.
+#
+# Before this works you must:
+#   1. Configure a Trusted Publisher for your package on npmjs.org (Package settings →
+#      Trusted Publisher) pointing at THIS repo and the release.yml workflow filename.
+#      No NPM_TOKEN secret is required — OIDC handles auth.
+#   2. Make sure your package.json does NOT route the publish back to GitHub Packages.
+#      `publishConfig.registry` wins over everything else, so for a scoped package set it
+#      explicitly to npm (or omit it — a scoped package defaults to npm when no scope
+#      registry is configured):
+#        "publishConfig": { "registry": "https://registry.npmjs.org", "access": "public" }
+#      A leftover "publishConfig": { "registry": "https://npm.pkg.github.com" } from a
+#      GitHub Packages setup will silently send the publish to the wrong registry.
+# See docs/secrets.md for the full setup.
+#
+# `id-token: write` is REQUIRED here — it is what lets npm mint the short-lived
+# OIDC credential. Without it the publish fails.
+#
+# `provenance` stays off (the reusable default) while this repo is private;
+# flip `provenance: true` once the repo is public if you want signed provenance.
+#
+# workflow_dispatch is kept as an escape hatch — lets you re-run a release from the
+# Actions tab without pushing a new commit.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    secrets: inherit
+
+  release:
+    needs: ci
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1
+    with:
+      registry: npm
+    secrets: inherit
