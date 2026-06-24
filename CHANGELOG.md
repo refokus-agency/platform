@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.4.0](https://github.com/refokus-agency/platform/compare/v1.3.1...v1.4.0) (2026-06-24)
+
+
+### Features
+
+* add release workflow variant for public npm via OIDC Trusted Publishing ([a15f725](https://github.com/refokus-agency/platform/commit/a15f725840eedab92fba909e49c7eedcaa5d9ce9))
+* add release workflow variant for public npm via OIDC Trusted Publishing ([#30](https://github.com/refokus-agency/platform/issues/30)) ([549042d](https://github.com/refokus-agency/platform/commit/549042d2058ac0987b1a445b76335026014c35bb))
+
 ## [1.3.1](https://github.com/refokus-agency/platform/compare/v1.3.0...v1.3.1) (2026-06-01)
 
 
