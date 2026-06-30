@@ -4,6 +4,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Emit `deps:` so release-please surfaces bumps under the Dependencies
+    # changelog section (see release-please-config.json). Without this,
+    # Dependabot auto-detects conventional commits and uses `chore(deps)`,
+    # which release-please hides.
+    commit-message:
+      prefix: "deps"
     groups:
       actions:
         patterns: ["*"]
