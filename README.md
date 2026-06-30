@@ -81,7 +81,7 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 `@main` stays available for testing pre-release changes; `@<sha>` works for paranoid pinning. Most repos should just use `@v1`.
 
-Dependency bumps from Dependabot are committed as `deps:` and show up under a **Dependencies** section in the changelog and release notes. They don't trigger a release on their own — only features and fixes bump the version — so dependency updates are rolled into the next release cut by a `feat`/`fix`.
+Dependency bumps from Dependabot are committed as `deps:` and show up under a **Dependencies** section in the changelog and release notes. Each bump cuts a **patch** release on its own (`feat` bumps a minor, breaking changes a major), so the `@v1` tag moves and consumers pick up dependency updates automatically — same as any other patch.
 
 ## Support
 
