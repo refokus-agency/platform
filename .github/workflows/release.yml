@@ -22,7 +22,13 @@ on:
         description: Version of semantic-release to install (passed to cycjimmy/semantic-release-action).
         required: false
         type: string
-        default: '24'
+        # NOTE: semantic-release v25 raised the Node floor — it requires Node >= 22.14,
+        # and on the Node 24 line specifically >= 24.10.0. The `node-version` default
+        # below ('24') resolves to the latest 24.x on ubuntu-latest, which satisfies this.
+        # Any caller that overrides `node-version` to an older release (e.g. '20', or a
+        # 22.x below 22.14) will fail to run semantic-release. Confirm callers before
+        # relying on this default.
+        default: '25'
       extra-plugins:
         description: Extra semantic-release plugins to install, newline- or space-separated. Defaults to the common Refokus set (@semantic-release/changelog, @semantic-release/git, @semantic-release/exec).
         required: false
