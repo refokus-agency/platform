@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.5.0](https://github.com/refokus-agency/platform/compare/v1.4.0...v1.5.0) (2026-06-30)
+
+
+### Features
+
+* add transferred input to deploy.yml reusable ([b5cbe85](https://github.com/refokus-agency/platform/commit/b5cbe8504cb5fc6351e06b50f792cea1834e5042))
+* add transferred input to deploy.yml reusable ([#21](https://github.com/refokus-agency/platform/issues/21)) ([7c8ca8b](https://github.com/refokus-agency/platform/commit/7c8ca8bceede6e18b16b89276cfb24841228703d))
+
 ## [1.4.0](https://github.com/refokus-agency/platform/compare/v1.3.1...v1.4.0) (2026-06-24)
 
 
