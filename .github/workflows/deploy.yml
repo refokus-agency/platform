@@ -72,11 +72,11 @@ jobs:
 
       - name: Checkout caller repo
         if: ${{ !inputs.transferred }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout platform repo (for composite actions)
         if: ${{ !inputs.transferred }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
