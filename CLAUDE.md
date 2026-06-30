@@ -48,3 +48,5 @@ Two maintainers with equal merge/release authority: [@taprile314](https://github
 ## Conventional Commits
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, ...). Squash-merge to `main`; the squash message is what shows up in `git log`.
+
+**Dependency bumps surface in the changelog.** Dependabot is configured (`.github/dependabot.yml`) to commit with the `deps:` prefix, and `release-please-config.json` maps the `deps` type to a visible **Dependencies** section. Without this, Dependabot auto-detects conventional commits, emits `chore(deps)`, and release-please hides it. Note: `deps` does **not** bump the version on its own — only `feat` / `fix` / breaking do — so a dependency bump won't cut a release by itself; it rides into the next release cut by a feat/fix. If a bump genuinely changes the reusables' behavior for callers (e.g. a new runtime requirement), type it `feat:` / `fix:` so it bumps the version and propagates to `@v1` consumers promptly.
