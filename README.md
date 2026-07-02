@@ -62,7 +62,7 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 - [Getting started](docs/getting-started.md) — set up a new repo step by step
 - [Migration guide](docs/migration.md) — move an existing repo off its bespoke workflows
 - [Secrets](docs/secrets.md) — which secrets are needed and where to configure them
-- [Dependabot](docs/dependabot.md) — why Dependabot PRs need manual rerun and how to handle them
+- [Dependabot](docs/dependabot.md) — how Dependabot PRs run (normally, via `GITHUB_TOKEN`) and the preview-deploy actor guard
 - [Architecture](docs/architecture.md) — design decisions and how the pieces fit together
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
 - [Contributing](docs/contributing.md) — how to change the reusables safely
