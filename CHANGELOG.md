@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.6.0](https://github.com/refokus-agency/platform/compare/v1.5.0...v1.6.0) (2026-07-02)
+
+
+### Features
+
+* **deploy:** comment preview URL on PR ([b4bf28d](https://github.com/refokus-agency/platform/commit/b4bf28dee83cfa859174599a691cd91c132f0e3e))
+* **deploy:** comment preview URL on PR ([c366920](https://github.com/refokus-agency/platform/commit/c366920612e478ebd5b32e1518e0728aa3ed2b4e))
+
 ## [1.5.0](https://github.com/refokus-agency/platform/compare/v1.4.0...v1.5.0) (2026-06-30)
 
 
