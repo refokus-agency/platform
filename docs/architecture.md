@@ -36,6 +36,8 @@ Runs the standard CI checklist (lint, typecheck, test, build) against a repo. Ea
 
 Deploys to Vercel at a specific environment (`preview`, `stage`, or `production`). The workflow itself is environment-agnostic — the caller passes the environment, the reusable handles the Vercel CLI incantations.
 
+When the triggering event is `pull_request` (i.e. a `pr-preview.yml`-style caller), the job also upserts a single sticky comment on the PR with the deployed URL — found via a hidden HTML marker and updated in place on subsequent pushes, rather than piling up one comment per commit. This requires the caller to grant `pull-requests: write`; callers triggered by `push` (stage/production) never hit this step, so they don't need the extra permission.
+
 ### Reusable workflow: `release.yml`
 
 Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing. The publish target is selected by the `registry` input:

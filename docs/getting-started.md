@@ -95,7 +95,7 @@ Your repo needs these secrets available (via org inheritance or repo-level):
 | `VERCEL_ORG_ID` | `deploy.yml` | org |
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** (each project has its own) |
 
-`GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers).
+`GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers). `pr-preview.yml` additionally declares `pull-requests: write` so `deploy.yml` can post the preview URL as a PR comment.
 
 Check the Vercel secrets under **Settings → Secrets and variables → Actions** in the repo. Anything inherited from the org will show up under "Organization secrets".
 

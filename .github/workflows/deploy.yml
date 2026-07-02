@@ -51,6 +51,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -148,3 +151,38 @@ jobs:
             --scope "${{ secrets.VERCEL_ORG_ID }}" \
             --token="${{ secrets.VERCEL_TOKEN }}"
         shell: bash
+
+      - name: Comment deploy URL on PR
+        if: ${{ !inputs.transferred && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+        with:
+          script: |
+            const marker = '<!-- vercel-deploy-comment -->';
+            const body = `${marker}\n**Vercel ${process.env.DEPLOY_ENV} deploy:** ${process.env.DEPLOY_URL}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find((c) => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
