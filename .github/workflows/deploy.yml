@@ -38,6 +38,14 @@ on:
         required: false
         type: boolean
         default: false
+      submodules:
+        description: |
+          Checkout git submodules. Set to true if your repo has submodules (e.g. a shared code
+          submodule). Requires CHECKOUT_TOKEN if any submodule points at a private repo other
+          than the caller's own — the default GITHUB_TOKEN can't read across repos.
+        required: false
+        type: boolean
+        default: false
     secrets:
       # required: false so a transferred repo (whose Vercel secrets may be stale or removed)
       # can still call this reusable — the deploy steps are skipped when transferred is true.
@@ -46,6 +54,12 @@ on:
       VERCEL_ORG_ID:
         required: false
       VERCEL_PROJECT_ID:
+        required: false
+      CHECKOUT_TOKEN:
+        description: |
+          Token used to checkout the caller repo and its submodules. Only needed when
+          submodules is true and a submodule points at a different private repo. Falls back
+          to the default GITHUB_TOKEN when not provided.
         required: false
 
 jobs:
@@ -76,6 +90,9 @@ jobs:
       - name: Checkout caller repo
         if: ${{ !inputs.transferred }}
         uses: actions/checkout@v7
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ secrets.CHECKOUT_TOKEN || github.token }}
 
       - name: Checkout platform repo (for composite actions)
         if: ${{ !inputs.transferred }}

@@ -46,6 +46,21 @@ on:
         required: false
         type: boolean
         default: false
+      submodules:
+        description: |
+          Checkout git submodules. Set to true if your repo has submodules (e.g. a shared code
+          submodule). Requires CHECKOUT_TOKEN if any submodule points at a private repo other
+          than the caller's own — the default GITHUB_TOKEN can't read across repos.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CHECKOUT_TOKEN:
+        description: |
+          Token used to checkout the caller repo and its submodules. Only needed when
+          submodules is true and a submodule points at a different private repo. Falls back
+          to the default GITHUB_TOKEN when not provided.
+        required: false
 
 jobs:
   checks:
@@ -53,6 +68,9 @@ jobs:
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v7
+        with:
+          submodules: ${{ inputs.submodules }}
+          token: ${{ secrets.CHECKOUT_TOKEN || github.token }}
 
       - name: Checkout platform repo (for composite actions)
         uses: actions/checkout@v7
