@@ -14,6 +14,8 @@ on:
 permissions:
   contents: read
   packages: read
+  pull-requests: write
+  deployments: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
