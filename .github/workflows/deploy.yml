@@ -4,8 +4,8 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: Vercel environment — preview | stage | production. Not required when transferred is true.
-        required: false
+        description: Vercel environment — preview | stage | production.
+        required: true
         type: string
       node-version:
         description: Node version.
@@ -22,14 +22,6 @@ on:
         required: false
         type: string
         default: main
-      transferred:
-        description: |
-          Set to true when this repo has been handed off to a client's Vercel team. The deploy
-          job logs a skip notice and exits 0 without invoking Vercel — no failed runs, no noise.
-          Default false. Only the deploy is skipped; CI (lint/typecheck/test/build) is unaffected.
-        required: false
-        type: boolean
-        default: false
       unsafe-install-scripts:
         description: |
           DANGEROUS — setting to true lets dependencies run postinstall scripts. A compromised
@@ -47,14 +39,12 @@ on:
         type: boolean
         default: false
     secrets:
-      # required: false so a transferred repo (whose Vercel secrets may be stale or removed)
-      # can still call this reusable — the deploy steps are skipped when transferred is true.
       VERCEL_TOKEN:
-        required: false
+        required: true
       VERCEL_ORG_ID:
-        required: false
+        required: true
       VERCEL_PROJECT_ID:
-        required: false
+        required: true
       CHECKOUT_TOKEN:
         description: |
           Token used to checkout the caller repo and its submodules. Only needed when
@@ -76,14 +66,7 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
-      - name: Transferred repo — skip deploy
-        if: ${{ inputs.transferred }}
-        run: |
-          echo "[deploy] skipped: repo marked as transferred"
-        shell: bash
-
       - name: Validate environment input
-        if: ${{ !inputs.transferred }}
         run: |
           case "${{ inputs.environment }}" in
             preview|stage|production) ;;
@@ -92,14 +75,12 @@ jobs:
         shell: bash
 
       - name: Checkout caller repo
-        if: ${{ !inputs.transferred }}
         uses: actions/checkout@v7
         with:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.CHECKOUT_TOKEN || github.token }}
 
       - name: Checkout platform repo (for composite actions)
-        if: ${{ !inputs.transferred }}
         uses: actions/checkout@v7
         with:
           repository: refokus-agency/platform
@@ -107,7 +88,6 @@ jobs:
           path: .platform
 
       - name: Configure npm for GitHub Packages
-        if: ${{ !inputs.transferred }}
         run: |
           echo "@refokus-agency:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
@@ -115,7 +95,6 @@ jobs:
 
       - name: Setup
         id: setup
-        if: ${{ !inputs.transferred }}
         uses: ./.platform/.github/actions/setup
         with:
           node-version: ${{ inputs.node-version }}
@@ -124,7 +103,6 @@ jobs:
 
       - name: Map environment to Vercel flags
         id: vercel
-        if: ${{ !inputs.transferred }}
         shell: bash
         run: |
           case "${{ inputs.environment }}" in
@@ -141,23 +119,19 @@ jobs:
           esac
 
       - name: Install Vercel CLI
-        if: ${{ !inputs.transferred }}
         run: npm install -g vercel@latest
         shell: bash
 
       - name: Vercel pull
-        if: ${{ !inputs.transferred }}
         run: vercel pull --yes --environment=${{ steps.vercel.outputs.pull-env }} --token=${{ secrets.VERCEL_TOKEN }}
         shell: bash
 
       - name: Vercel build
-        if: ${{ !inputs.transferred }}
         run: vercel build ${{ steps.vercel.outputs.build-flag }} --token=${{ secrets.VERCEL_TOKEN }}
         shell: bash
 
       - name: Vercel deploy
         id: deploy
-        if: ${{ !inputs.transferred }}
         run: |
           URL=$(vercel deploy --prebuilt ${{ steps.vercel.outputs.deploy-flag }} --token=${{ secrets.VERCEL_TOKEN }})
           echo "url=$URL" >> "$GITHUB_OUTPUT"
@@ -165,7 +139,7 @@ jobs:
         shell: bash
 
       - name: Alias for stage
-        if: ${{ !inputs.transferred && inputs.environment == 'stage' }}
+        if: inputs.environment == 'stage'
         run: |
           STAGE_ALIAS="${GITHUB_REPOSITORY##*/}-stage.vercel.app"
           vercel alias set "${{ steps.deploy.outputs.url }}" "$STAGE_ALIAS" \
@@ -174,7 +148,7 @@ jobs:
         shell: bash
 
       - name: Comment deploy URL on PR
-        if: ${{ !inputs.transferred && github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/github-script@v9
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
@@ -211,7 +185,7 @@ jobs:
       - name: Record GitHub deployment
         # Only for the persistent environments (production/stage). Preview PR
         # deploys are ephemeral and already surfaced via the PR comment above.
-        if: ${{ !inputs.transferred && (inputs.environment == 'production' || inputs.environment == 'stage') }}
+        if: ${{ inputs.environment == 'production' || inputs.environment == 'stage' }}
         uses: actions/github-script@v7
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
