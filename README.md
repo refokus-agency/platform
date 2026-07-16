@@ -72,7 +72,7 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 Callers reference the floating major tag `@v1`:
 
 ```yaml
-uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
+uses: refokus-agency/platform/.github/workflows/ci.yml@v2 # x-release-please-major
 ```
 
 `@v1` always points at the latest non-breaking release on the v1.x line, so callers pick up patches and minors automatically without per-repo PRs. Breaking changes cut a new major (`v2`), and callers stay on `@v1` until they explicitly migrate.

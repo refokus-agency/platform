@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [2.0.0](https://github.com/refokus-agency/platform/compare/v1.8.0...v2.0.0) (2026-07-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* the transferred input is removed from deploy.yml's workflow_call contract. environment, VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID are required again (they were relaxed to optional to support the transferred path). No known caller sets transferred: true (#22 was never merged), but the removal is contract-breaking per this repo's own rules, so it must ship as v2.
+
+### Reverts
+
+* remove transferred input from deploy.yml reusable ([4862bfe](https://github.com/refokus-agency/platform/commit/4862bfede7c32c9e66ffe382e17f814833b82fc9))
+* remove transferred input from deploy.yml reusable ([394b3e6](https://github.com/refokus-agency/platform/commit/394b3e67850a817712e863b8c5aa38431fedbd1a))
+
 ## [1.8.0](https://github.com/refokus-agency/platform/compare/v1.7.1...v1.8.0) (2026-07-16)
 
 
