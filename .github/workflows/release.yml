@@ -19,10 +19,14 @@ on:
         type: string
         default: main
       semantic-release-version:
-        description: Version of semantic-release to install (passed to cycjimmy/semantic-release-action).
+        description: |
+          Version of semantic-release to install (passed to cycjimmy/semantic-release-action).
+          Defaults to major 25: @semantic-release/npm gained OIDC Trusted Publishing support
+          in v13 (bundled with semantic-release v25). v24 (npm plugin v12) aborts with
+          ENONPMTOKEN on the `npm` registry path before the OIDC exchange can run.
         required: false
         type: string
-        default: '24'
+        default: '25'
       extra-plugins:
         description: Extra semantic-release plugins to install, newline- or space-separated. Defaults to the common Refokus set (@semantic-release/changelog, @semantic-release/git, @semantic-release/exec).
         required: false
