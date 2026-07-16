@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.7.1](https://github.com/refokus-agency/platform/compare/v1.7.0...v1.7.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* ship semantic-release v25 default for OIDC npm publishing ([1ef9997](https://github.com/refokus-agency/platform/commit/1ef9997a3a7857a99246d023269dc9aab8fe1639))
+* ship semantic-release v25 default for OIDC npm publishing ([bf9a300](https://github.com/refokus-agency/platform/commit/bf9a300f964318c09e066401c2c4644ae7cb5f65))
+
 ## [1.7.0](https://github.com/refokus-agency/platform/compare/v1.6.0...v1.7.0) (2026-07-16)
 
 
