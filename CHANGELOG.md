@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.8.0](https://github.com/refokus-agency/platform/compare/v1.7.1...v1.8.0) (2026-07-16)
+
+
+### Features
+
+* **deploy:** record GitHub deployment status for stage/production ([82ae53b](https://github.com/refokus-agency/platform/commit/82ae53b62a29b6f48933e8ba5929bfed646e597d))
+
 ## [1.7.1](https://github.com/refokus-agency/platform/compare/v1.7.0...v1.7.1) (2026-07-16)
 
 
