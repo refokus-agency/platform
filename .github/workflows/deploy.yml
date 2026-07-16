@@ -65,9 +65,13 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
+    # No explicit permissions block on purpose: the job inherits the caller's
+    # granted permissions. Declaring a scope here (e.g. `deployments: write`)
+    # would force EVERY caller to grant it or the run fails at startup. By
+    # inheriting, the "Record GitHub deployment" step below stays opt-in —
+    # callers that grant `deployments: write` get deploys recorded; those that
+    # don't simply skip it. Callers still need `contents: read` (checkout) and
+    # `pull-requests: write` (PR comment); see examples/*.yml.
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -203,3 +207,15 @@ jobs:
                 body,
               });
             }
+
+      - name: Record GitHub deployment
+        # Only for the persistent environments (production/stage). Preview PR
+        # deploys are ephemeral and already surfaced via the PR comment above.
+        if: ${{ !inputs.transferred && (inputs.environment == 'production' || inputs.environment == 'stage') }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          REF: ${{ github.ref_name }}
+        with:
+          script-path: .platform/.github/scripts/record-github-deployment.js
