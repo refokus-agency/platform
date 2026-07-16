@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.7.0](https://github.com/refokus-agency/platform/compare/v1.6.0...v1.7.0) (2026-07-16)
+
+
+### Features
+
+* support git submodules in ci.yml and deploy.yml ([b569ebe](https://github.com/refokus-agency/platform/commit/b569ebe1da414b71809202f30c4a48e2b78d8388))
+* support git submodules in ci.yml and deploy.yml ([506ecf7](https://github.com/refokus-agency/platform/commit/506ecf764c0284c1c8e1b5a84a39fce5d2b9874d))
+
 ## [1.6.0](https://github.com/refokus-agency/platform/compare/v1.5.0...v1.6.0) (2026-07-02)
 
 
