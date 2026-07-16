@@ -12,6 +12,7 @@ What secrets the reusables need, where they should live, and how to configure th
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** | Unique per Vercel project |
 | `RELEASE_APP_ID` | `release.yml` | **org or repo** | Optional. GitHub App ID for branch-protection bypass on `main`. Required when using `@semantic-release/git` against a branch with a "PRs required" ruleset. |
 | `RELEASE_APP_PRIVATE_KEY` | `release.yml` | **org or repo** | Optional. PEM private key paired with `RELEASE_APP_ID`. |
+| `CHECKOUT_TOKEN` | `ci.yml`, `deploy.yml` | **org or repo** | Optional. Only needed when `submodules: true` and a submodule points at a private repo other than the caller's own — `GITHUB_TOKEN` can't read across repos. See [Submodules](#submodules) below. |
 
 `GITHUB_TOKEN` covers what we used to need a PAT for: cloning the public `refokus-agency/platform` reusables (no auth needed for public repos), authenticating `.npmrc` for `@refokus-agency/*` packages on GitHub Packages, and tagging/publishing in `release.yml`. The caller declares the scopes via `permissions:` (`contents`, `packages`).
 
@@ -148,6 +149,26 @@ Notes:
 - **Provenance** (`provenance: true`) requires a **public** repository. Leave it off (the default) while the caller repo is private, or the publish fails. Note that `provenance` only controls `NPM_CONFIG_PROVENANCE`; if your `.releaserc` (or `package.json` `release` config) sets `npmProvenance: true` inside the `@semantic-release/npm` plugin, that overrides the input — remove it and use the `provenance` input instead.
 - **Private dependencies:** the `npm` path does **not** write GitHub Packages auth to `~/.npmrc`, so it can only install dependencies that are publicly resolvable. If your package depends on private `@refokus-agency/*` packages hosted on GitHub Packages, the install step will fail — open an issue on `platform` if you hit this; it needs a deliberate fix (install auth for one scope while publishing under it to a different registry is a non-trivial combination).
 - `GITHUB_TOKEN` is still used on this path — not for npm auth, but for creating the GitHub Release, tagging, and the `@semantic-release/git` push. The optional `RELEASE_APP_*` bypass works the same as on the GitHub Packages path.
+
+## Submodules
+
+`ci.yml` and `deploy.yml` accept a `submodules` input (default `false`). When `true`, both reusables pass `submodules: true` to the caller-repo checkout step, so registered submodules get populated (otherwise the submodule path checks out empty and any build importing from it fails).
+
+If every submodule lives in the **same repo family the default `GITHUB_TOKEN` already covers** (i.e. points back at the caller's own repo — not realistic for a true submodule, but included for completeness), no further setup is needed. In practice a submodule almost always points at a **different** repo, and the default `GITHUB_TOKEN` cannot read across repos — the checkout of the submodule fails with a 403/404 even though the caller repo itself checks out fine.
+
+To fix that, pass `CHECKOUT_TOKEN` — a token with read access to the submodule's repo — via `secrets: inherit` (or explicitly):
+
+```yaml
+ci:
+  uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+  with:
+    submodules: true
+  secrets: inherit   # forwards CHECKOUT_TOKEN if the org/repo has one configured
+```
+
+**Current recommended value:** a classic PAT with `repo` scope that has access to the submodule repo, stored as `CHECKOUT_TOKEN` (org-level if multiple repos share the same submodule, repo-level otherwise). This is the same shape as the legacy `GH_PAT_TOKEN` several pre-migration custom-code repos already use for this exact purpose — reuse that value instead of minting a new one if it already has the right access.
+
+**This is a stop-gap, not the target state.** A long-lived PAT is exactly what `GITHUB_TOKEN` and the `RELEASE_APP_*` GitHub App pattern (above) were introduced to get away from. When there's time to do it properly, replace `CHECKOUT_TOKEN` with a GitHub App installation token minted the same way `release.yml` mints one for the branch-protection bypass: create/reuse an org GitHub App with `contents: read` on the submodule repo, install it there, and mint a short-lived token in a step before checkout. Track this as follow-up work rather than blocking the submodule support on it.
 
 ## Rotating secrets
 

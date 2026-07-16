@@ -86,6 +86,10 @@ git commit -m "ci: migrate to centralized platform workflows"
 git push -u origin migrate-to-platform-cicd
 ```
 
+**Gotchas:**
+- `deploy.yml`'s job unconditionally requests `pull-requests: write` (it comments the deploy URL on the PR when triggered by one), and a reusable can't be granted more permissions than its caller holds. Add `pull-requests: write` to the `permissions:` block in **all three** caller files, not just `pr-preview.yml`, or the run fails to start.
+- If the repo has a git submodule (common in custom-code sites sharing a component library across sibling sites), add `submodules: true` to every `ci:`/`deploy-*:` job's `with:` block and make sure `CHECKOUT_TOKEN` is available — see [secrets.md § Submodules](secrets.md#submodules). Without it the submodule path checks out empty and the build fails.
+
 ## Behavior changes to expect
 
 Compared to the common pre-migration patterns:
