@@ -120,8 +120,28 @@ For on-push flows (stage, production, release), merge the PR or push to the corr
 
 If something breaks, check [troubleshooting.md](troubleshooting.md).
 
+## 6. (Recommended) Require the CI check on `main`
 
-## 6. (Optional) Verify Dependabot flow
+Adding `pr-ci.yml` makes the check run on every PR, but by default GitHub still lets anyone merge with that check red — or without waiting for it at all. To actually block merges on a failing check, add a branch protection rule (or ruleset) on `main` requiring it:
+
+```bash
+gh api repos/<org>/<repo>/branches/main/protection \
+  --method PUT \
+  --input - <<'EOF'
+{
+  "required_status_checks": { "strict": true, "checks": [{ "context": "ci" }] },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+EOF
+```
+
+Or via the UI: **Settings → Branches → Add branch protection rule** for `main`, enable "Require status checks to pass before merging", and select the `ci` check (it only shows up as selectable after it has run at least once on the repo).
+
+Without this, the CI added in step 2 is purely informational — every repo that copies these workflows should turn it into an actual merge gate.
+
+## 7. (Optional) Verify Dependabot flow
 
 Dependabot PRs run CI exactly like human PRs in this setup — no special handling required. If you want to confirm the flow on a fresh repo:
 
