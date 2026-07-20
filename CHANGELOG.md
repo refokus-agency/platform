@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.8.1](https://github.com/refokus-agency/platform/compare/v1.8.0...v1.8.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **deploy:** rename record-github-deployment script to .cjs ([e2f24a3](https://github.com/refokus-agency/platform/commit/e2f24a39d799b7acd622c0ab9d0790977f29cb37))
+* **deploy:** use supported github-script script input instead of script-path ([e58ea6c](https://github.com/refokus-agency/platform/commit/e58ea6cba7c8a79294d7286afae907bb73edf387))
+* **deploy:** use supported github-script script input instead of script-path ([1f6c83c](https://github.com/refokus-agency/platform/commit/1f6c83c3f9b917528d654247c9167e70c70f169c)), closes [#56](https://github.com/refokus-agency/platform/issues/56)
+
 ## [1.8.0](https://github.com/refokus-agency/platform/compare/v1.7.1...v1.8.0) (2026-07-16)
 
 
