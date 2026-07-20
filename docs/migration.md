@@ -112,6 +112,7 @@ After merging:
 - **library**: push a Conventional Commit (`fix:`, `feat:`) and verify a new version in GitHub Packages.
 - **Vercel 2-env**: the merge to `main` triggers production deploy.
 - **Vercel 3-env**: the merge to `main` triggers stage deploy; to promote to production, push or merge into the `production` branch.
+- If `main` isn't already protected with the `ci` check required, add that now — see [getting-started.md → step 6](getting-started.md#6-recommended-require-the-ci-check-on-main).
 
 ## Rolling back
 
