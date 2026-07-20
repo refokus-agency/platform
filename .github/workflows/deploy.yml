@@ -219,5 +219,5 @@ jobs:
           REF: ${{ github.ref_name }}
         with:
           script: |
-            const run = require('./.platform/.github/scripts/record-github-deployment.js');
+            const run = require('./.platform/.github/scripts/record-github-deployment.cjs');
             await run({ github, context, core });
