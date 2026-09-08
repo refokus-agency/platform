@@ -12,6 +12,8 @@ What secrets the reusables need, where they should live, and how to configure th
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** | Unique per Vercel project |
 | `RELEASE_APP_ID` | `release.yml` | **org or repo** | Optional. GitHub App ID for branch-protection bypass on `main`. Required when using `@semantic-release/git` against a branch with a "PRs required" ruleset. |
 | `RELEASE_APP_PRIVATE_KEY` | `release.yml` | **org or repo** | Optional. PEM private key paired with `RELEASE_APP_ID`. |
+| `ANTHROPIC_API_KEY` | `code-review.yml` | **org or repo** | Optional. Anthropic API key for the AI code review. Without it the review skips green — it never fails the run. See [Anthropic credentials for code review](#anthropic-credentials-for-code-review) below. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | `code-review.yml` | **org or repo** | Optional. Alternative to `ANTHROPIC_API_KEY`. |
 | `CHECKOUT_TOKEN` | `ci.yml`, `deploy.yml` | **org or repo** | Optional. Only needed when `submodules: true` and a submodule points at a private repo other than the caller's own — `GITHUB_TOKEN` can't read across repos. See [Submodules](#submodules) below. |
 
 `GITHUB_TOKEN` covers what we used to need a PAT for: cloning the public `refokus-agency/platform` reusables (no auth needed for public repos), authenticating `.npmrc` for `@refokus-agency/*` packages on GitHub Packages, and tagging/publishing in `release.yml`. The caller declares the scopes via `permissions:` (`contents`, `packages`).
@@ -63,6 +65,40 @@ For `VERCEL_PROJECT_ID` (one value per Vercel project):
 1. Go to `https://github.com/refokus-agency/<repo>/settings/secrets/actions`.
 2. Click **New repository secret**.
 3. Set the value (get it from the Vercel project settings or by running `vercel link` locally and inspecting `.vercel/project.json`).
+
+### Anthropic credentials for code review
+
+`code-review.yml` accepts three mutually exclusive credential paths and needs exactly one:
+
+| Path | How | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` secret | Org or repo secret. Get the key from [console.anthropic.com](https://console.anthropic.com/settings/keys). | Simplest. Recommended at org level so every repo's caller works with no per-repo setup. |
+| `CLAUDE_CODE_OAUTH_TOKEN` secret | Org or repo secret. | Alternative to the API key. |
+| `federation-rule-id` + `anthropic-org-id` inputs | Passed as workflow **inputs**, not secrets — neither is sensitive. | Anthropic workload identity federation: the action exchanges the workflow's GitHub OIDC token for a short-lived credential, so there is no static key to rotate. |
+
+If none is configured, the workflow emits a `::notice` naming what's missing, skips the review, and completes **green**. It never fails a PR over a missing credential.
+
+**The three paths are not perfectly equivalent for inline comments.** By default `claude-code-action` buffers unconfirmed inline comments and classifies them (real review vs. test/probe) before posting — its `classify_inline_comments` input defaults to `true`. That classification pass reads `ANTHROPIC_API_KEY` and only that key; the OAuth token and the federation credential are not forwarded to it. On those two paths the classification is therefore skipped and **every** buffered comment posts unfiltered. It fails open — nothing errors and no comment is lost — but expect slightly noisier reviews on the OAuth-only and federation-only paths.
+
+Three things worth knowing before you enable this:
+
+- **`id-token: write` is mandatory in the caller**, on every path — not just federation. The action exchanges the workflow's GitHub OIDC token for a GitHub App token. The reusable cannot detect the omission from the inside; the run just fails. `examples/pr-code-review.yml` grants it.
+- **The API key belongs to the caller, and so does the bill.** A reusable workflow runs in the caller's context with the caller's secrets, so each repo (and each external consumer) pays for its own reviews. The review fans out several parallel agents per PR event, so cost scales with PR activity, not repo count. The trigger deliberately excludes `push` for this reason.
+- **External consumers should pass secrets explicitly rather than `secrets: inherit`.** `inherit` hands a caller's entire secret set to code in this repo, and `@v1` is a floating tag force-moved on every v1.x release. Inside `refokus-agency` that trust already exists; outside it, prefer:
+
+  ```yaml
+  permissions:
+    contents: read
+    pull-requests: write
+    issues: read
+    id-token: write   # mandatory — see the bullet above
+
+  jobs:
+    code-review:
+      uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+      secrets:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  ```
 
 ## Creating the Vercel secrets
 

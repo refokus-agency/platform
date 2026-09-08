@@ -1,0 +1,117 @@
+name: Code review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      plugins:
+        description: |
+          Newline-separated list of Claude Code plugins to install. Newline-separated, NOT
+          comma-separated — a comma-joined list is treated as one plugin name and fails to resolve.
+        required: false
+        type: string
+        default: code-review@claude-code-plugins
+      plugin-marketplaces:
+        description: |
+          Newline-separated list of Claude Code plugin marketplace Git URLs. Newline-separated,
+          NOT comma-separated.
+        required: false
+        type: string
+        default: https://github.com/anthropics/claude-code.git
+      prompt:
+        description: Instructions for Claude. Defaults to the code-review plugin's slash command against the current PR.
+        required: false
+        type: string
+        default: /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+      allowed-tools:
+        description: |
+          Comma-separated tool allowlist passed to the Claude CLI as --allowedTools. The default is
+          the union of the code-review plugin's own frontmatter allowlist plus the inline-comment
+          MCP tool. Narrowing it to the MCP tool alone starves the review — it can no longer read
+          the diff or post the summary comment.
+        required: false
+        type: string
+        default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*)
+      track-progress:
+        description: Force tag mode with a tracking comment on the PR.
+        required: false
+        type: boolean
+        default: false
+      fetch-depth:
+        description: Checkout depth for the caller repo.
+        required: false
+        type: string
+        default: '1'
+      federation-rule-id:
+        description: |
+          Anthropic workload identity federation rule ID (fdrl_...). When set together with
+          anthropic-org-id, the action exchanges the workflow's GitHub OIDC token instead of using
+          a static API key. Requires the caller to grant id-token: write.
+        required: false
+        type: string
+        default: ''
+      anthropic-org-id:
+        description: Anthropic organization UUID, used with federation-rule-id.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      # required: false on purpose. A required secret would fail the run at startup for every
+      # caller that hasn't configured it — including Dependabot and fork PRs, which never receive
+      # secrets at all. The "Resolve auth" step below gates on the credential instead, so an
+      # unconfigured caller skips green rather than failing red.
+      ANTHROPIC_API_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    # No explicit permissions block on purpose: the job inherits the caller's
+    # granted permissions. Declaring a scope here would force EVERY caller to
+    # grant it or the run fails at startup. Callers need `contents: read`,
+    # `pull-requests: write`, `issues: read` and `id-token: write`;
+    # see examples/pr-code-review.yml.
+    steps:
+      - name: Resolve auth
+        id: auth
+        # The `secrets` context is not usable in a job-level `if:`, so the credential check runs
+        # here and every later step gates on this step's output instead.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          FEDERATION_RULE_ID: ${{ inputs.federation-rule-id }}
+          ANTHROPIC_ORG_ID: ${{ inputs.anthropic-org-id }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] \
+            || [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] \
+            || { [ -n "$FEDERATION_RULE_ID" ] && [ -n "$ANTHROPIC_ORG_ID" ]; }; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::[code-review] skipped: no Anthropic credential available. Configure the ANTHROPIC_API_KEY secret (or CLAUDE_CODE_OAUTH_TOKEN, or both the federation-rule-id and anthropic-org-id inputs). This is expected on Dependabot and fork pull requests, which never receive secrets."
+          fi
+        shell: bash
+
+      - name: Checkout caller repo
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.fetch-depth }}
+
+      - name: Code review
+        if: steps.auth.outputs.ready == 'true'
+        # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
+        # be exposed as a workflow input. Bump it here when upstream cuts a new major.
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: ${{ inputs.prompt }}
+          plugins: ${{ inputs.plugins }}
+          plugin_marketplaces: ${{ inputs.plugin-marketplaces }}
+          track_progress: ${{ inputs.track-progress }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
+          anthropic_organization_id: ${{ inputs.anthropic-org-id }}
+          # v1 has no `allowed_tools` input — the allowlist reaches the CLI through claude_args.
+          claude_args: ${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}

@@ -21,6 +21,7 @@ Pick the workflow files that match **the triggers your repo cares about** and co
 | [`production-deploy.yml`](examples/production-deploy.yml) | push to `production` | CI + Vercel production deploy |
 | [`main-release.yml`](examples/main-release.yml) | push to `main` | CI + semantic-release to GitHub Packages |
 | [`main-release-npm.yml`](examples/main-release-npm.yml) | push to `main` | CI + semantic-release to public npm via OIDC Trusted Publishing |
+| [`pr-code-review.yml`](examples/pr-code-review.yml) | PR | AI code review — inline comments + summary on the PR |
 
 ### Common shapes
 
@@ -45,7 +46,8 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │   └── workflows/
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
-│       └── release.yml         # Reusable: semantic-release (GitHub Packages or public npm via OIDC)
+│       ├── release.yml         # Reusable: semantic-release (GitHub Packages or public npm via OIDC)
+│       └── code-review.yml     # Reusable: AI code review on PRs via claude-code-action
 ├── examples/                   # Atomic caller workflows, one per (trigger, action) pair
 │   ├── pr-ci.yml               # PR → CI
 │   ├── pr-preview.yml          # PR → CI + Vercel preview
@@ -53,7 +55,8 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │   ├── main-production.yml     # push main → CI + Vercel production
 │   ├── production-deploy.yml   # push production → CI + Vercel production
 │   ├── main-release.yml        # push main → CI + semantic-release (GitHub Packages)
-│   └── main-release-npm.yml    # push main → CI + semantic-release (public npm via OIDC)
+│   ├── main-release-npm.yml    # push main → CI + semantic-release (public npm via OIDC)
+│   └── pr-code-review.yml      # PR → AI code review
 └── docs/                       # Detailed documentation
 ```
 
