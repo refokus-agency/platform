@@ -47,9 +47,25 @@ Runs semantic-release, which handles version bumps, changelog generation, git ta
 
 The two paths are conditional steps inside the same `publish` job, so `npm publish` always runs from `release.yml` — that is the workflow filename consumers register in their npmjs.org Trusted Publisher config. On the npm path `NODE_AUTH_TOKEN` is deliberately left unset; if it were set, npm would skip the OIDC exchange. See [secrets.md](secrets.md) for the npmjs.org Trusted Publisher setup.
 
+### Reusable workflow: `code-review.yml`
+
+Runs an AI code review on a pull request via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action), which installs the `code-review@claude-code-plugins` plugin and posts inline comments plus a summary comment on the PR.
+
+The workflow is credential-gated rather than credential-required. Its first step, `Resolve auth`, resolves one of three paths — the `ANTHROPIC_API_KEY` secret, the `CLAUDE_CODE_OAUTH_TOKEN` secret, or the `federation-rule-id` + `anthropic-org-id` input pair for Anthropic workload identity federation — into a single `ready` boolean. If none resolves, the workflow emits a `::notice` naming exactly what to configure, skips the checkout and review steps, and finishes green. That is what makes Dependabot and fork pull requests non-events here: neither receives secrets, so both skip cleanly instead of failing red.
+
+A second gate, `Resolve actor`, covers bot-authored pull requests. `claude-code-action` enforces its own human-actor guard: it resolves the triggering actor's account type through the GitHub Users API and **throws** when the type is not `User`, unless the actor matches its `allowed_bots` input. Left alone, that turns every bot-authored pull request into a red failure in every caller that has a credential configured — release-please's own release PR here being the first casualty. So the reusable pre-checks the same condition and skips green instead, with a `::notice` naming the actor. The `allowed-bots` input (comma-separated, or `*`; the `[bot]` suffix is optional) opts specific bots back into review and is passed through to the action unchanged.
+
+Skipping is the right default rather than a concession: a release-please changelog bump or a Renovate lockfile update is generated output no human wrote, so a review of it spends tokens to tell nobody anything.
+
+Because a reusable workflow runs in the **caller's** context, the API key is always the caller's. An external consumer supplies their own `ANTHROPIC_API_KEY`; this repo's secrets are never in scope, and neither is its Anthropic bill.
+
+Two caller-side requirements the reusable cannot enforce from the inside: `id-token: write` is mandatory (the action exchanges the workflow's GitHub OIDC token for a GitHub App token), and `pull-requests: write` is needed to post the review. See `examples/pr-code-review.yml`.
+
 ### Callers
 
 Each repo has a thin workflow that composes the reusables. The caller owns branch logic (which branch triggers which deploy environment) and nothing else.
+
+GitHub renders a reusable's status check as `<caller job key> / <reusable job key>`, so the two halves must not repeat each other: the caller's key names *what* is running, the reusable's key names the *action* it performs. That is why the inner jobs are `checks`, `deploy`, `publish` and `review` rather than a second copy of the workflow name — `pr-ci.yml` reads as `ci / checks`, `pr-code-review.yml` as `code-review / review`. Renaming an inner job renames the check, which silently breaks any branch-protection rule that requires the old name, so pick it correctly before the first release that ships the reusable.
 
 ## Key design decisions
 
@@ -169,6 +185,14 @@ Each reusable does a secondary checkout of `refokus-agency/platform` into `.plat
 Since `platform` is public, the secondary checkout is anonymous — no token is needed. This was the key change that unblocked Dependabot PRs.
 
 An alternative would be to publish the composite action as a standalone GitHub Action on the marketplace and reference it by name. That's overkill — this one's internal.
+
+### Why does `code-review.yml` skip the platform re-checkout?
+
+It is the one reusable that does **not** check out `refokus-agency/platform` into `.platform/`. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above.
+
+The secondary checkout exists for exactly one reason: reaching the local composite `setup` action. `code-review.yml` never calls `setup` — `claude-code-action` ships its own runtime and installs what it needs. Worse, calling `setup` here would hard-fail: it detects the package manager from a lockfile, and `platform` has no `package.json` at all, so it would exit with `::error::No lockfile found`.
+
+A checkout with no consumer is just latency and one more moving part. So this reusable checks out the caller repo and nothing else.
 
 ### Why is `platform` public?
 

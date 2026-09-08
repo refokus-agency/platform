@@ -65,6 +65,21 @@ jobs:
 
 Result: Dependabot PRs get CI green and `deploy-preview` shows as "skipped" (which counts as passing, not failing). Human PRs run both jobs as usual.
 
+## AI code review (`pr-code-review.yml`)
+
+Same shape as the Vercel case, solved one level down. Dependabot can't access `ANTHROPIC_API_KEY` either — but `code-review.yml` doesn't need an actor guard in the caller, because its own `Resolve auth` step already gates on whether a credential resolved:
+
+```yaml
+jobs:
+  code-review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    secrets: inherit
+```
+
+Result: Dependabot PRs finish green with a `::notice` explaining the skip, no `if:` needed. Gating on the credential rather than on `github.actor` is strictly broader — it covers fork PRs (which also get no secrets) and repos that simply haven't configured a key yet, neither of which an actor guard would catch.
+
+The reusable does carry a second, independent gate on the actor — but for a different reason. `claude-code-action` hard-fails on any non-human actor unless the actor is in its `allowed_bots` list, so `code-review.yml` pre-checks the actor's account type and skips green. That matters most for repos where a credential *is* reachable on a bot run: a release-please or Renovate pull request would otherwise fail red. Dependabot usually skips one step earlier, at the credential gate, and never reaches this one. Pass `allowed-bots` to review a specific bot's pull requests anyway.
+
 ## Defensive layers
 
 What's in place to limit blast radius if a dependency is compromised:

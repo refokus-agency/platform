@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.9.0](https://github.com/refokus-agency/platform/compare/v1.8.1...v1.9.0) (2026-09-08)
+
+
+### Features
+
+* add reusable code-review workflow backed by claude-code-action ([3b404e1](https://github.com/refokus-agency/platform/commit/3b404e19d19bf033c27e3504754c1fb2ef526de2))
+* default federation inputs to caller org variables ([8c2adb0](https://github.com/refokus-agency/platform/commit/8c2adb0f0f3f4910773a204105402eb25fa18a72))
+
+
+### Bug Fixes
+
+* name the code-review job for its action, not its workflow ([acd5d46](https://github.com/refokus-agency/platform/commit/acd5d46bee67029596d8000649812e47c073ad6b))
+* skip code review on bot-authored pull requests ([0bc2fc8](https://github.com/refokus-agency/platform/commit/0bc2fc8da943899994641ed5433c8184acbc1671))
+* skip code review on bot-authored pull requests ([4b87d25](https://github.com/refokus-agency/platform/commit/4b87d25e867226c90f968f3de0f8069e565805a2))
+
 ## [1.8.1](https://github.com/refokus-agency/platform/compare/v1.8.0...v1.8.1) (2026-07-20)
 
 
