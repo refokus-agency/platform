@@ -19,25 +19,28 @@ Common failure modes when using the centralized workflows, and how to fix them.
 
 ## "Resource not accessible by integration" on checkout
 
-**Symptoms:** the secondary checkout of `refokus-agency/platform` fails.
+**Symptoms:** a checkout step fails — either your own repo or a submodule.
 
-**Cause:** the `GH_PAT_TOKEN` doesn't have access to the `platform` repo, or the token is missing.
+**Cause:** the caller didn't grant `contents: read`, or the checkout needs to reach a private repo the built-in `GITHUB_TOKEN` can't see (in practice, a submodule that lives in a different private repo).
+
+> The secondary checkout of `refokus-agency/platform` into `.platform/` is **not** a likely cause. `platform` is public, and the reusables check it out with the default `GITHUB_TOKEN` and no explicit `token:` — no PAT is involved anywhere in that step.
 
 **Fix:**
 
-- Verify `GH_PAT_TOKEN` is configured as an org-level secret with access granted to the calling repo.
-- Verify the token's scope includes `repo` (classic PAT) or has contents:read on the platform repo (fine-grained PAT).
-- Make sure the PAT hasn't expired.
+- Confirm the caller's `permissions:` block grants `contents: read`. Sync the caller from [examples/](../examples/) if you're unsure.
+- If you pass `submodules: true` and a submodule points at a different private repo, configure `CHECKOUT_TOKEN`. See [secrets.md → Submodules](secrets.md#submodules).
+- If the failing step is the `.platform/` checkout specifically, confirm the `platform-ref` input points at a ref that actually exists.
 
 ## "401 Unauthorized" when installing from GitHub Packages
 
 **Symptoms:** `pnpm install` / `npm ci` / `bun install` fails with `401` on a `@refokus-agency/*` package.
 
-**Cause:** `.npmrc` auth isn't set up before install, or the token doesn't have `read:packages`.
+**Cause:** the caller didn't grant `packages: read`, so the `GITHUB_TOKEN` written into `.npmrc` can't read from GitHub Packages. Or the package lives outside `refokus-agency`.
 
 **Fix:**
 
-- Each reusable writes `.npmrc` before install. If it's failing, check the `GH_PAT_TOKEN` scopes.
+- Each reusable writes `.npmrc` before install, authenticating with the built-in `GITHUB_TOKEN` — not a PAT. Confirm the caller's `permissions:` block grants `packages: read`; every file in [examples/](../examples/) already does.
+- If the package lives in a different org, `GITHUB_TOKEN` can't reach it at all. That needs a PAT with `read:packages` written by your own workflow — the platform reusables don't accept one for this.
 - If you have a committed `.npmrc` in your repo, make sure it doesn't override the one written by the workflow. Remove the committed one, or use `.npmrc` only for scope config (`@refokus-agency:registry=...`) without auth — the workflow adds auth at CI time.
 
 ## Vercel deploy fails with "Project not found"
@@ -138,7 +141,7 @@ If you don't want to set up a GitHub App, two alternatives:
 
 **Likely causes:**
 
-- Missing secrets in the second repo. `secrets: inherit` silently passes `null` for secrets the caller doesn't have access to — the reusable's `required: true` will then fail with a more useful error.
+- Missing secrets in the second repo. `secrets: inherit` silently passes nothing for secrets the caller doesn't have, and **every secret the reusables declare is `required: false`** — so there is no startup error to point at it. The step that needs the secret either skips or fails deeper in the log. Check secret availability first; see [secrets.md → Verifying secrets are available](secrets.md#verifying-secrets-are-available).
 - Different `package.json` scripts between repos (one has `lint`, the other doesn't).
 - Different lockfile (one uses pnpm, the other npm).
 
