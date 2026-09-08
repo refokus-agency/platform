@@ -65,6 +65,8 @@ Two caller-side requirements the reusable cannot enforce from the inside: `id-to
 
 Each repo has a thin workflow that composes the reusables. The caller owns branch logic (which branch triggers which deploy environment) and nothing else.
 
+GitHub renders a reusable's status check as `<caller job key> / <reusable job key>`, so the two halves must not repeat each other: the caller's key names *what* is running, the reusable's key names the *action* it performs. That is why the inner jobs are `checks`, `deploy`, `publish` and `review` rather than a second copy of the workflow name — `pr-ci.yml` reads as `ci / checks`, `pr-code-review.yml` as `code-review / review`. Renaming an inner job renames the check, which silently breaks any branch-protection rule that requires the old name, so pick it correctly before the first release that ships the reusable.
+
 ## Key design decisions
 
 ### Why split into separate reusables instead of one big workflow?

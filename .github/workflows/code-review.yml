@@ -80,7 +80,11 @@ on:
         required: false
 
 jobs:
-  code-review:
+  # Named for the action it performs, not for the workflow. GitHub renders a reusable's check as
+  # `<caller job key> / <this job key>`, so reusing `code-review` here produced the useless
+  # `code-review / code-review`. Matches the convention in the sibling reusables: ci.yml uses
+  # `checks`, deploy.yml uses `deploy`, release.yml uses `publish`.
+  review:
     runs-on: ubuntu-latest
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
