@@ -1,0 +1,25 @@
+# This repo dogfooding its own code-review reusable. Resolved by local path (not @v1) so a
+# pull request exercises the version on its own branch — the only real integration test
+# available for a reusable workflow.
+
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  # Mandatory — see the comment in examples/pr-code-review.yml.
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  code-review:
+    uses: ./.github/workflows/code-review.yml
+    secrets: inherit
