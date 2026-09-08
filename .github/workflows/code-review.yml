@@ -46,14 +46,20 @@ on:
           Anthropic workload identity federation rule ID (fdrl_...). When set together with
           anthropic-org-id, the action exchanges the workflow's GitHub OIDC token instead of using
           a static API key. Requires the caller to grant id-token: write.
+          Defaults to the caller's ANTHROPIC_FEDERATION_RULE_ID Actions variable, so setting it
+          once at org level configures every repo with no per-caller wiring. Neither this nor
+          anthropic-org-id is sensitive — they are identifiers, not credentials, which is why they
+          are variables and inputs rather than secrets.
         required: false
         type: string
-        default: ''
+        default: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
       anthropic-org-id:
-        description: Anthropic organization UUID, used with federation-rule-id.
+        description: |
+          Anthropic organization UUID, used with federation-rule-id. Defaults to the caller's
+          ANTHROPIC_ORG_ID Actions variable.
         required: false
         type: string
-        default: ''
+        default: ${{ vars.ANTHROPIC_ORG_ID }}
     secrets:
       # required: false on purpose. A required secret would fail the run at startup for every
       # caller that hasn't configured it — including Dependabot and fork PRs, which never receive

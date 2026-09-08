@@ -74,9 +74,21 @@ For `VERCEL_PROJECT_ID` (one value per Vercel project):
 |---|---|---|
 | `ANTHROPIC_API_KEY` secret | Org or repo secret. Get the key from [console.anthropic.com](https://console.anthropic.com/settings/keys). | Simplest. Recommended at org level so every repo's caller works with no per-repo setup. |
 | `CLAUDE_CODE_OAUTH_TOKEN` secret | Org or repo secret. | Alternative to the API key. |
-| `federation-rule-id` + `anthropic-org-id` inputs | Passed as workflow **inputs**, not secrets — neither is sensitive. | Anthropic workload identity federation: the action exchanges the workflow's GitHub OIDC token for a short-lived credential, so there is no static key to rotate. |
+| `ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_ORG_ID` org **variables** | Actions *variables*, not secrets — neither value is sensitive. Set once at org level; the inputs of the same name default to them. | Anthropic workload identity federation: the action exchanges the workflow's GitHub OIDC token for a short-lived credential, so there is no static key to store or rotate. |
 
 If none is configured, the workflow emits a `::notice` naming what's missing, skips the review, and completes **green**. It never fails a PR over a missing credential.
+
+**Federation needs no per-repo wiring, and no secrets at all.** `federation-rule-id` and `anthropic-org-id` default to the caller's `ANTHROPIC_FEDERATION_RULE_ID` and `ANTHROPIC_ORG_ID` Actions **variables**. GitHub resolves the `vars` context in a reusable against the *caller's* repository and organization — per GitHub's docs, *"For reusable workflows, the variables from the caller workflow's repository are used"* — so setting the two org variables once configures every repo in the org, and the caller stays exactly as it ships:
+
+```yaml
+jobs:
+  code-review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+```
+
+Set them at `https://github.com/organizations/<org>/settings/variables/actions` (the **Variables** tab, not Secrets). A caller can still override either per repo by passing it explicitly under `with:`. If a variable is unset, the input resolves to an empty string and the guard falls through to the other credential paths — nothing breaks.
+
+This is also the cleanest answer to the `secrets: inherit` concern above: on the federation path there is no secret to inherit in the first place.
 
 **The three paths are not perfectly equivalent for inline comments.** By default `claude-code-action` buffers unconfirmed inline comments and classifies them (real review vs. test/probe) before posting — its `classify_inline_comments` input defaults to `true`. That classification pass reads `ANTHROPIC_API_KEY` and only that key; the OAuth token and the federation credential are not forwarded to it. On those two paths the classification is therefore skipped and **every** buffered comment posts unfiltered. It fails open — nothing errors and no comment is lost — but expect slightly noisier reviews on the OAuth-only and federation-only paths.
 
