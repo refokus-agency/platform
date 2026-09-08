@@ -41,6 +41,15 @@ on:
         required: false
         type: string
         default: '1'
+      allowed-bots:
+        description: |
+          Comma-separated list of bot actors whose pull requests should still be reviewed, or '*'
+          for every bot. Empty (the default) skips bot-authored pull requests green: their diffs
+          are generated (release-please changelog bumps, Renovate lockfile churn), so a review
+          spends tokens on output no human wrote. The `[bot]` suffix is optional in each entry.
+        required: false
+        type: string
+        default: ''
       federation-rule-id:
         description: |
           Anthropic workload identity federation rule ID (fdrl_...). When set together with
@@ -71,7 +80,11 @@ on:
         required: false
 
 jobs:
-  code-review:
+  # Named for the action it performs, not for the workflow. GitHub renders a reusable's check as
+  # `<caller job key> / <this job key>`, so reusing `code-review` here produced the useless
+  # `code-review / code-review`. Matches the convention in the sibling reusables: ci.yml uses
+  # `checks`, deploy.yml uses `deploy`, release.yml uses `publish`.
+  review:
     runs-on: ubuntu-latest
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
@@ -99,14 +112,66 @@ jobs:
           fi
         shell: bash
 
-      - name: Checkout caller repo
+      - name: Resolve actor
+        id: actor
+        # Gated on the credential so an unconfigured caller never spends an API call here.
         if: steps.auth.outputs.ready == 'true'
+        # Mirrors claude-code-action's own guard (src/github/validation/actor.ts): it resolves
+        # the triggering actor's account type through the Users API and THROWS when the type is
+        # not `User`, unless the actor matches its `allowed_bots` input. Pre-checking the same
+        # condition here is what turns that hard failure into a green skip — without it every
+        # bot-authored pull request (release-please, Renovate) fails red in every caller repo
+        # that has a credential configured.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOWED_BOTS: ${{ inputs.allowed-bots }}
+        run: |
+          normalize() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\[bot\]$//'
+          }
+
+          # A 404 means a GitHub App actor with no backing user account, which the action also
+          # treats as a bot. A transient API failure lands here too and skips the review rather
+          # than failing the pull request — green is the safe direction for an advisory job.
+          actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null || echo 'Bot')
+
+          if [ "$actor_type" = 'User' ]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          allowed=false
+          trimmed=$(printf '%s' "$ALLOWED_BOTS" | tr -d '[:space:]')
+          if [ "$trimmed" = '*' ]; then
+            allowed=true
+          elif [ -n "$trimmed" ]; then
+            wanted=$(normalize "$GITHUB_ACTOR")
+            IFS=','
+            for bot in $trimmed; do
+              if [ "$(normalize "$bot")" = "$wanted" ]; then
+                allowed=true
+                break
+              fi
+            done
+            unset IFS
+          fi
+
+          if [ "$allowed" = true ]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::[code-review] skipped: pull request triggered by ${GITHUB_ACTOR} (account type: ${actor_type}), not a human. Set the allowed-bots input to review this bot's pull requests anyway."
+          fi
+        shell: bash
+
+      - name: Checkout caller repo
+        if: steps.auth.outputs.ready == 'true' && steps.actor.outputs.eligible == 'true'
         uses: actions/checkout@v7
         with:
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Code review
-        if: steps.auth.outputs.ready == 'true'
+        if: steps.auth.outputs.ready == 'true' && steps.actor.outputs.eligible == 'true'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
         # be exposed as a workflow input. Bump it here when upstream cuts a new major.
         uses: anthropics/claude-code-action@v1
@@ -119,5 +184,6 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
           anthropic_organization_id: ${{ inputs.anthropic-org-id }}
+          allowed_bots: ${{ inputs.allowed-bots }}
           # v1 has no `allowed_tools` input — the allowlist reaches the CLI through claude_args.
           claude_args: ${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
