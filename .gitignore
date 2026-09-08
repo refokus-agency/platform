@@ -2,3 +2,6 @@
 
 # Cothinker discovery session artifacts (kael.code /implement-plan)
 .cothinker/
+
+# Agent skill-registry cache (kael/gentle-ai tooling, machine-local)
+.atl/
