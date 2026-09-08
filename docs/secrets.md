@@ -90,6 +90,32 @@ Set them at `https://github.com/organizations/<org>/settings/variables/actions` 
 
 This is also the cleanest answer to the `secrets: inherit` concern above: on the federation path there is no secret to inherit in the first place.
 
+#### Scoping the federation rule — read before enabling it on a public repo
+
+Federation's safety lives entirely in the **rule's `match` block**, not in keeping the two identifiers quiet. They are identifiers, not credentials — Anthropic's own documentation puts them in a plaintext `env:` block in the workflow file. Nobody can use them without a GitHub-signed OIDC token whose claims satisfy your rule. But a loosely scoped rule turns that pair into an open door, and Anthropic warns about it directly:
+
+> A `subject_prefix` of `repo:your-org/*` alone matches every repository in your organization, and without a `ref` constraint it also matches `pull_request` runs triggered from forks. Anyone who can open a pull request against a matching repository could obtain a federated Anthropic token.
+>
+> — [Use WIF with GitHub Actions](https://platform.claude.com/docs/en/manage-claude/wif-providers/github-actions)
+
+**That warning is about exactly this workflow.** `code-review.yml` runs on `pull_request`, whose OIDC `sub` claim is `repo:<owner>/<repo>:pull_request` — a shape that does not distinguish a fork PR from an internal one.
+
+And the obvious mitigation does not apply here: the docs recommend pinning `claims.ref` to `refs/heads/main`, but a pull request never carries that ref, so a rule pinned that way means the review never authenticates at all. To make code review work you must admit `pull_request`, which is the very event the warning concerns.
+
+Scope to the exact repository, never to the org:
+
+```json
+"match": {
+  "subject_prefix": "repo:refokus-agency/<repo>:pull_request",
+  "audience": "https://api.anthropic.com",
+  "claims": { "repository_owner": "refokus-agency" }
+}
+```
+
+**On a public repository, prefer the `ANTHROPIC_API_KEY` secret over federation.** This inverts the usual advice, and the reason is worth stating plainly: GitHub *structurally* withholds secrets from fork pull requests — it is a platform guarantee you cannot misconfigure. Federation on a `pull_request` trigger instead depends on you getting the rule's scope exactly right, and a mistake there fails open and silent. Federation is the better choice on private repos, or wherever only org members can open pull requests.
+
+**Known limitation.** The reusable exposes only `federation-rule-id` and `anthropic-org-id`. Upstream also accepts `anthropic_service_account_id`, `anthropic_workspace_id` (required when the rule spans multiple workspaces) and `anthropic_oidc_audience`. If your rule needs any of those, the reusable cannot pass them yet — adding them is additive and non-breaking.
+
 **The three paths are not perfectly equivalent for inline comments.** By default `claude-code-action` buffers unconfirmed inline comments and classifies them (real review vs. test/probe) before posting — its `classify_inline_comments` input defaults to `true`. That classification pass reads `ANTHROPIC_API_KEY` and only that key; the OAuth token and the federation credential are not forwarded to it. On those two paths the classification is therefore skipped and **every** buffered comment posts unfiltered. It fails open — nothing errors and no comment is lost — but expect slightly noisier reviews on the OAuth-only and federation-only paths.
 
 Three things worth knowing before you enable this:
