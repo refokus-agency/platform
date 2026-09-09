@@ -51,15 +51,79 @@ The two paths are conditional steps inside the same `publish` job, so `npm publi
 
 Runs an AI code review on a pull request via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action), which installs the `code-review@claude-code-plugins` plugin and posts inline comments plus a summary comment on the PR.
 
-The workflow is credential-gated rather than credential-required. Its first step, `Resolve auth`, resolves one of three paths — the `ANTHROPIC_API_KEY` secret, the `CLAUDE_CODE_OAUTH_TOKEN` secret, or the `federation-rule-id` + `anthropic-org-id` input pair for Anthropic workload identity federation — into a single `ready` boolean. If none resolves, the workflow emits a `::notice` naming exactly what to configure, skips the checkout and review steps, and finishes green. That is what makes Dependabot and fork pull requests non-events here: neither receives secrets, so both skip cleanly instead of failing red.
+**It runs on request and on nothing else.** The caller is bound to `issue_comment`, and a review starts when someone comments the `trigger-phrase` (default `@claude review`) on a pull request. There is no `pull_request` trigger and no `push` trigger. Comment again after a push to review the new head — the reusable is built for exactly that and will not refuse on the grounds that it already commented.
 
-A second gate, `Resolve actor`, covers bot-authored pull requests. `claude-code-action` enforces its own human-actor guard: it resolves the triggering actor's account type through the GitHub Users API and **throws** when the type is not `User`, unless the actor matches its `allowed_bots` input. Left alone, that turns every bot-authored pull request into a red failure in every caller that has a credential configured — release-please's own release PR here being the first casualty. So the reusable pre-checks the same condition and skips green instead, with a `::notice` naming the actor. The `allowed-bots` input (comma-separated, or `*`; the `[bot]` suffix is optional) opts specific bots back into review and is passed through to the action unchanged.
+That is a deliberate trade of automatic coverage for cost control: the review fans out several parallel agents per run, so on `synchronize` the bill scaled with push activity and a good share of it went to re-reviewing work in progress. On request, every run is one a human asked for.
 
-Skipping is the right default rather than a concession: a release-please changelog bump or a Renovate lockfile update is generated output no human wrote, so a review of it spends tokens to tell nobody anything.
+#### Why the trigger phrase is checked here and not by the action
 
-Because a reusable workflow runs in the **caller's** context, the API key is always the caller's. An external consumer supplies their own `ANTHROPIC_API_KEY`; this repo's secrets are never in scope, and neither is its Anthropic bill.
+`claude-code-action` has its own `trigger_phrase` input, and wiring it up would be a **no-op**. The action auto-detects its mode, and any comment event carrying a `prompt` is routed to agent mode (`src/modes/detector.ts`); the trigger is then resolved as:
 
-Two caller-side requirements the reusable cannot enforce from the inside: `id-token: write` is mandatory (the action exchanges the workflow's GitHub OIDC token for a GitHub App token), and `pull-requests: write` is needed to post the review. See `examples/pr-code-review.yml`.
+```ts
+const containsTrigger =
+  modeName === "tag"
+    ? isEntityContext(context) && checkContainsTrigger(context)
+    : !!context.inputs?.prompt;
+```
+
+— `src/entrypoints/prepare.ts`
+
+The phrase is only ever consulted in **tag** mode. This reusable always passes a `prompt` (the code-review slash command is the whole point), so it is always in agent mode, where the trigger is simply "was a prompt supplied" — always true. Passing `trigger_phrase` through would look like a gate and let every comment start a review.
+
+So the gate is the job's own `if:`:
+
+```yaml
+if: >-
+  github.event.issue.pull_request &&
+  inputs.trigger-phrase != '' &&
+  contains(github.event.comment.body, inputs.trigger-phrase)
+```
+
+All three clauses are free. GitHub evaluates a job-level `if:` **before** it provisions a runner, so ordinary pull request chatter costs no runner time and leaves no skipped-looking check on the PR. `github.event.issue.pull_request` is the documented way to tell a pull request comment from a plain issue comment — `issue_comment` fires for both, and that key exists in the payload only when the commented-on issue is a pull request. Without it, every comment on every issue would start a review of a pull request that does not exist.
+
+The `!= ''` clause is not defensive noise. `contains(body, '')` is true for every string, so a caller that blanked `trigger-phrase` hoping to disable the workflow would instead have armed it on every comment on every pull request. Blank means off.
+
+`inputs` is available in a job-level `if:`; `secrets` is the one context that is not, which is why the credential gate is still a step.
+
+#### Four gates, all skipping green
+
+The workflow is gated rather than required at every stage: each gate emits a `::notice` naming the reason and finishes green, because an advisory job should never be the thing that blocks a pull request.
+
+1. **`Resolve auth`** — resolves one of three credential paths (the `ANTHROPIC_API_KEY` secret, the `CLAUDE_CODE_OAUTH_TOKEN` secret, or the `federation-rule-id` + `anthropic-org-id` pair for workload identity federation) into a single `ready` boolean. None configured → skip.
+
+2. **`Resolve actor`** — two checks on **whoever posted the comment**. Note the change of subject: under the old `pull_request` trigger this gate was about who *opened* the PR.
+   - *Not a human.* `claude-code-action` resolves the actor's account type and **throws** unless it matches `allowed_bots`. Pre-checking turns that red failure into a green skip. It is also the loop guard: Claude's own summary is posted by `claude[bot]`, and an allowed bot actor could let a summary quoting the phrase trigger itself indefinitely.
+   - *No write access.* `src/entrypoints/prepare.ts` runs `checkWritePermissions` for every entity context — `issue_comment` is one — and throws `"Actor does not have write permissions to the repository"`. On a **public** caller repo this matters a great deal: anyone on GitHub can post the trigger phrase, and without the gate every one of them leaves a red X. The gate reads `github.event.comment.author_association` (`OWNER` / `MEMBER` / `COLLABORATOR`) because it arrives in the payload — no token scope, no request, no rate limit. It is an approximation: `MEMBER` means "member of the owning org", which does not strictly imply write here, so an org member with read-only access still reaches the action and still fails there. The action stays authoritative; this gate absorbs the common cases.
+
+3. **`Resolve pull request`** — the pull request must be open, and its head must live in the caller's own repository. See below.
+
+4. Everything downstream (`Acknowledge request`, checkout, review) hangs off gate 3's `eligible` output.
+
+Once gate 3 passes, the first thing that happens is an acknowledgement. A comment trigger has no natural feedback: you type the phrase and, without help, watch nothing happen for the several minutes a review takes. So the reusable reacts to the triggering comment with 👀 before starting. It needs `issues: write` (comment reactions go through the issues API) and is deliberately best-effort — a caller granting only `issues: read` loses the reaction, not the review.
+
+#### Why fork pull requests are skipped
+
+`issue_comment` runs with the base repository's **secrets, always** — the same property as `pull_request_target`. That is a real change of posture. Under the old `pull_request` trigger a fork PR simply received no secrets and skipped at `Resolve auth` on its own, as a platform guarantee. Now the job always holds `ANTHROPIC_API_KEY`, so checking out a fork head would mean running contributor-authored code in a job that holds a credential — the classic [pwn request](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/).
+
+`claude-code-action`'s own `docs/security.md` prescribes a mitigation for this shape (base ref at the workspace root, head into a subdirectory, `--add-dir`). This reusable does something stricter instead and skips forks outright, keeping the trust boundary at the repository edge rather than relying on getting a mitigation right. Every Refokus repo takes pull requests from branches of the same repo — which is why `secrets: inherit` is workable here at all — so the head is always written by someone who already has write access. The `--add-dir` pattern remains the documented escape hatch if fork review is ever needed.
+
+#### Why the head SHA is resolved explicitly
+
+`issue_comment` carries no ref: the payload describes the comment and the issue, never a commit. `actions/checkout` with no `ref:` would therefore check out the caller's **default branch**, and the failure would be silent rather than loud — the review gets its diff from `gh pr diff` over the API, so it would still produce plausible findings while the subagents validating each one against the source read the wrong tree. So `Resolve pull request` fetches `.head.sha` from the API and the checkout pins it.
+
+#### Testing a change to `code-review.yml`
+
+The in-repo dogfood caller **no longer tests the branch under review.** GitHub runs an `issue_comment` workflow from the default branch, always — both the caller file and the `./`-relative reusable it resolves to. So commenting on a pull request here exercises `code-review.yml` as it exists on `main`.
+
+Use Option A in [contributing.md](contributing.md#option-a-test-against-your-branch-in-a-real-repo): point a low-stakes repo's caller at `refokus-agency/platform/.github/workflows/code-review.yml@your-branch` and comment the phrase there. A caller running from its own default branch may invoke a reusable at any ref, so this works.
+
+The same mechanism retired a long-standing annoyance: `claude-code-action` refuses to run when the triggering workflow on a pull request head differs from the default branch's copy, and a default-branch trigger cannot differ from itself.
+
+#### On versioning
+
+Moving from `pull_request` to `issue_comment` changed the **caller contract** — a caller still bound to `pull_request` gets a job whose `if:` is false and which therefore never runs, silently — while leaving the `workflow_call` interface backward compatible (`trigger-phrase` was added; nothing was removed). By the rule in [CLAUDE.md](../CLAUDE.md) that is a semantic change and would call for `feat!:`.
+
+It shipped on the **v1** line as `feat:` anyway, as a deliberate, bounded exception: release-please treats this repo as a single package, so a major would have bumped `ci.yml`, `deploy.yml` and `release.yml` to `v2` as well and frozen every repo pinned at `@v1` on the last v1 release until each one re-pinned four caller files. `code-review.yml` had exactly one consumer, updated alongside this change. If `code-review.yml` ever has more than a couple of consumers, that exception stops being available and the next such change needs a real major.
 
 #### Two input defaults that look redundant and are not
 
@@ -67,13 +131,17 @@ Both were shipped broken and diagnosed against a real 1083-line consumer pull re
 
 **`allowed-tools` must be a superset of the plugin's frontmatter, not a copy of it.** The `code-review` command declares its own `allowed-tools` in frontmatter, and the first version of this default was that string verbatim plus the inline-comment MCP tool. Same text, inverted meaning: in frontmatter the list is *additive*, layering auto-approvals onto a session that already has Read, Glob and Grep, while as the CLI's `--allowedTools` it is the *complete* tool set and everything absent is denied. The command's subagents collect the relevant CLAUDE.md paths, audit the diff against them, and validate each candidate finding in the code — all of which need a file-reading tool. Starved of one, the fan-out still launches and still bills (one run: 9 turns, $6.46, 41 permission denials) and then reports "No issues found" having read nothing but `gh pr diff`. Hence the trailing `Read,Glob,Grep`. Keep additions read-only: `claude-code-action` treats the checked-out pull request head as untrusted and restores `.claude`, `CLAUDE.md`, `.mcp.json` and friends from the base branch for exactly that reason, so `Write`, `Edit` or a general `Bash(...)` entry would give a pull request author a foothold that the read-only tools do not.
 
-**`prompt` must keep its step 1 override.** Step 1 of the command tells the model to stop without reviewing if Claude has already commented on the pull request — sensible for a slash command a human runs once, wrong for a workflow bound to `synchronize`. Once the first run posts a summary, every later push short-circuits into a silent no-op: a few turns, ~$0.25, no comment, check green. Four pushes on that consumer pull request went unreviewed that way. So the default appends a paragraph lifting that one condition and only that one; closed, draft, trivial and automated all still stop the review. The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt — and a caller that overrides `prompt` with the bare slash command re-introduces the bug for itself.
+**`prompt` must keep its step 1 override.** Step 1 of the command tells the model to stop without reviewing if Claude has already commented on the pull request, and to stop on a draft. Both are sensible for a slash command a human runs once by hand, and both are wrong here for the same reason: **the trigger is already an explicit human request.** Someone typing the phrase on a pull request Claude reviewed two pushes ago wants the current head reviewed; someone typing it on a draft wants the draft reviewed. Under the old `synchronize` trigger the first condition was outright destructive — once the first run posted a summary, every later push short-circuited into a silent no-op (a few turns, ~$0.25, no comment, check green) and four pushes on that consumer pull request went unreviewed. So the default appends a paragraph lifting those two conditions and only those two; closed, trivial and automated all still stop the review. The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt — and a caller that overrides `prompt` with the bare slash command re-introduces the bug for itself.
+
+Because a reusable workflow runs in the **caller's** context, the API key is always the caller's. An external consumer supplies their own `ANTHROPIC_API_KEY`; this repo's secrets are never in scope, and neither is its Anthropic bill.
+
+Two caller-side requirements the reusable cannot enforce from the inside: `id-token: write` is mandatory (the action exchanges the workflow's GitHub OIDC token for a GitHub App token), and `pull-requests: write` is needed to post the review. See `examples/comment-code-review.yml`.
 
 ### Callers
 
 Each repo has a thin workflow that composes the reusables. The caller owns branch logic (which branch triggers which deploy environment) and nothing else.
 
-GitHub renders a reusable's status check as `<caller job key> / <reusable job key>`, so the two halves must not repeat each other: the caller's key names *what* is running, the reusable's key names the *action* it performs. That is why the inner jobs are `checks`, `deploy`, `publish` and `review` rather than a second copy of the workflow name — `pr-ci.yml` reads as `ci / checks`, `pr-code-review.yml` as `code-review / review`. Renaming an inner job renames the check, which silently breaks any branch-protection rule that requires the old name, so pick it correctly before the first release that ships the reusable.
+GitHub renders a reusable's status check as `<caller job key> / <reusable job key>`, so the two halves must not repeat each other: the caller's key names *what* is running, the reusable's key names the *action* it performs. That is why the inner jobs are `checks`, `deploy`, `publish` and `review` rather than a second copy of the workflow name — `pr-ci.yml` reads as `ci / checks`, `comment-code-review.yml` as `code-review / review`. Renaming an inner job renames the check, which silently breaks any branch-protection rule that requires the old name, so pick it correctly before the first release that ships the reusable.
 
 ## Key design decisions
 

@@ -1,0 +1,28 @@
+# This repo dogfoods its own code-review reusable: comment `@claude review` on a pull request.
+#
+# This file always runs from the DEFAULT BRANCH, so it does NOT exercise a change to
+# code-review.yml on a pull request's own branch — read
+# docs/architecture.md#testing-a-change-to-code-reviewyml before using it that way.
+
+name: Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # issues: write for the eyes reaction — see examples/comment-code-review.yml.
+  issues: write
+  # Mandatory — see the comment in examples/comment-code-review.yml.
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  code-review:
+    uses: ./.github/workflows/code-review.yml
+    secrets: inherit

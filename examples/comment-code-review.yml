@@ -1,0 +1,37 @@
+# AI code review, on request only — comment `@claude review` on a pull request.
+# Copy to .github/workflows/comment-code-review.yml in your repo.
+#
+# No `pull_request` trigger by design — a review costs real tokens per run, so it happens only
+# when a human asks. Ask again after a push to re-review the new head. No guards are needed in
+# this file: the reusable's own gates handle the credential, actor and fork checks and skip green
+# with a reason in the run log. See docs/architecture.md#four-gates-all-skipping-green.
+
+name: Code Review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # issues: write, not read — needed for the 👀 acknowledgement on the triggering comment.
+  # See docs/architecture.md#four-gates-all-skipping-green.
+  issues: write
+  # id-token: write is MANDATORY, not optional. claude-code-action exchanges this
+  # workflow's GitHub OIDC token for a GitHub App token — without it the action
+  # cannot authenticate and the run fails. The reusable cannot detect the omission
+  # from the inside, so it has to be granted here.
+  id-token: write
+
+concurrency:
+  # `github.event.issue.number` IS the pull request number on `issue_comment` — the payload
+  # carries no `pull_request` object, so the usual `github.event.pull_request.number` is empty
+  # here and would collapse every pull request into one concurrency group.
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  code-review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    secrets: inherit

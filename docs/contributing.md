@@ -74,6 +74,8 @@ You can't test a reusable workflow by "running" it — it only runs when called.
 
 This is the most realistic test — it exercises the actual caller → reusable path.
 
+**For `code-review.yml` this is the only option, and step 3 differs.** Trigger it by commenting `@claude review` on a pull request in the test repo, not by pushing. And do not reach for the dogfood caller in this repo instead: GitHub runs an `issue_comment` workflow from the default branch, so the in-repo caller exercises `code-review.yml` as it exists on `main`, never the version on your branch. See [architecture.md](architecture.md#testing-a-change-to-code-reviewyml).
+
 ### Option B: act (local runner)
 
 [`act`](https://github.com/nektos/act) runs workflows locally in Docker. It has limitations (reusable workflows with secrets don't work perfectly, composite actions sometimes misbehave) but it catches syntax errors and obvious logic bugs fast.
@@ -129,7 +131,9 @@ For breaking changes:
 3. Announce in the team channel before merging the release PR — once `v2` exists, `@v1` stops moving and consumers stay on the old line until they migrate explicitly.
 4. Update `examples/` in this repo to point at `@v2` so new repos start on the current major.
 
-Note: callers on `@v1` are *not* broken when `v2` is cut — they keep getting v1.x updates. They only break if they actively change to `@v2` and don't migrate their config.
+Note: callers on `@v1` are not *broken* when `v2` is cut — nothing about their current runs changes. But they do go **stale**, and more so than the usual semver story suggests: release-please treats this repo as a single package on `main`, so once `main` is on 2.x there is no v1.x release line to publish to and no maintenance branch feeding one. The `v1` tag simply stops moving, and every fix after that point is invisible to anyone pinned there until they re-pin.
+
+That cost is per *repo*, not per reusable — a major cut for one workflow strands callers of all four. So a change that is semantically breaking in a reusable with very few consumers may legitimately ship as `feat:` on the current major instead, with the contract change documented in prose. See [architecture.md](architecture.md#on-versioning) for the one precedent, its reasoning, and the condition under which it expires.
 
 ## Adding a new input
 
