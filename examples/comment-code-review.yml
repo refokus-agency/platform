@@ -29,7 +29,10 @@ concurrency:
   # carries no `pull_request` object, so the usual `github.event.pull_request.number` is empty
   # here and would collapse every pull request into one concurrency group.
   group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  cancel-in-progress: true
+  # false, not true: `concurrency` is per-run and the phrase is checked in the reusable's job
+  # `if:`, so ANY comment joins the group and `true` would cancel a running review.
+  # See docs/architecture.md#why-the-caller-sets-cancel-in-progress-false.
+  cancel-in-progress: false
 
 jobs:
   code-review:

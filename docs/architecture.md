@@ -92,7 +92,7 @@ The workflow is gated rather than required at every stage: each gate emits a `::
 1. **`Resolve auth`** — resolves one of three credential paths (the `ANTHROPIC_API_KEY` secret, the `CLAUDE_CODE_OAUTH_TOKEN` secret, or the `federation-rule-id` + `anthropic-org-id` pair for workload identity federation) into a single `ready` boolean. None configured → skip.
 
 2. **`Resolve actor`** — two checks on **whoever posted the comment**. Note the change of subject: under the old `pull_request` trigger this gate was about who *opened* the PR.
-   - *Not a human.* `claude-code-action` resolves the actor's account type and **throws** unless it matches `allowed_bots`. Pre-checking turns that red failure into a green skip. It is also the loop guard: Claude's own summary is posted by `claude[bot]`, and an allowed bot actor could let a summary quoting the phrase trigger itself indefinitely.
+   - *Not a human.* `claude-code-action` resolves the actor's account type and **throws** unless it matches `allowed_bots`. Pre-checking turns that red failure into a green skip. The review bot's own identity is rejected *before* `allowed-bots` is consulted, so no value of that input — `'*'` included — can arm a loop where a summary quoting the trigger phrase requests the next review. The bot is identified by name (`claude[bot]`, matched after the same lowercase/`[bot]`-stripping normalisation as the allowlist), which is what the action's GitHub App posts as.
    - *No write access.* `src/entrypoints/prepare.ts` runs `checkWritePermissions` for every entity context — `issue_comment` is one — and throws `"Actor does not have write permissions to the repository"`. On a **public** caller repo this matters a great deal: anyone on GitHub can post the trigger phrase, and without the gate every one of them leaves a red X. The gate reads `github.event.comment.author_association` (`OWNER` / `MEMBER` / `COLLABORATOR`) because it arrives in the payload — no token scope, no request, no rate limit. It is an approximation: `MEMBER` means "member of the owning org", which does not strictly imply write here, so an org member with read-only access still reaches the action and still fails there. The action stays authoritative; this gate absorbs the common cases.
 
 3. **`Resolve pull request`** — the pull request must be open, and its head must live in the caller's own repository. See below.
@@ -110,6 +110,33 @@ Once gate 3 passes, the first thing that happens is an acknowledgement. A commen
 #### Why the head SHA is resolved explicitly
 
 `issue_comment` carries no ref: the payload describes the comment and the issue, never a commit. `actions/checkout` with no `ref:` would therefore check out the caller's **default branch**, and the failure would be silent rather than loud — the review gets its diff from `gh pr diff` over the API, so it would still produce plausible findings while the subagents validating each one against the source read the wrong tree. So `Resolve pull request` fetches `.head.sha` from the API and the checkout pins it.
+
+#### Why the caller sets `cancel-in-progress: false`
+
+The example caller keys its concurrency group on `github.event.issue.number` — on `issue_comment` the payload has no `pull_request` object, so the usual `github.event.pull_request.number` is empty and would collapse every pull request into one group. The interesting half is the cancel flag.
+
+`concurrency` is a property of the **run**, evaluated when GitHub creates it, while the trigger phrase is checked in the reusable's **job-level `if:`**. So every comment on the pull request creates a run that joins the group, whether or not it contains the phrase. Under `cancel-in-progress: true` an ordinary "thanks, fixing that now" posted while a review is in flight cancels the review — a normal-use failure, not just a griefing vector.
+
+`false` also matches the trigger's semantics. `true` earned its place under `synchronize`, where a new push genuinely obsoleted the review of the previous head. A comment-triggered run is a request someone made on purpose, and a second `@claude review` is a second request rather than a replacement for the first.
+
+#### How the review models are chosen
+
+Two separate levers, and conflating them is the trap.
+
+`model` sets the **orchestrator** — the agent that reads the command, dispatches subagents and posts the comments. It reaches the CLI as `--model` inside `claude_args`, because `claude-code-action@v1` exposes no `model` input; `claude_args` is also where `--allowedTools` goes, so the two are composed into one expression.
+
+The orchestrator's model is *not* what the review costs. The `code-review` command names a tier per subagent in its own prompt text: haiku for the two triage steps, sonnet for the change summary and the CLAUDE.md audits, **opus for the two bug scans and for validating everything they flag**. The orchestrator honours those instructions, so `--model` moves dispatch and reporting while the fan-out — several parallel agents plus one validator per candidate finding — stays wherever the prompt put it.
+
+To keep Opus out of the review, the reusable pins what the alias resolves to rather than arguing with the prompt. `opus-model` is exported as `ANTHROPIC_DEFAULT_OPUS_MODEL`; the command still asks for an "Opus bug agent", the request still goes out under the `opus` alias, and the alias resolves to Sonnet. Per Claude Code's [model configuration](https://code.claude.com/docs/en/model-config) the `ANTHROPIC_DEFAULT_*_MODEL` family is provider-independent and covers subagents that name an alias, which is exactly this shape.
+
+Two reasons that beats appending a "use sonnet instead of opus" paragraph to `prompt`, which is the obvious alternative and how the step 1 override works:
+
+- **It is a mechanism, not an instruction.** Alias resolution happens below the model; a prompt override is something the orchestrator has to remember for every subagent it spawns.
+- **It does not depend on the command's wording.** The `prompt` default already carries one override that has to track step 1's stop conditions. Every further paragraph is another thing to re-read when upstream rewrites the command. Remapping an alias survives a rewrite.
+
+The variable is set at **job** level. The action re-exports it into the CLI subprocess from the `env` context, and its own step-level `env:` block shadows anything set on the step that calls it.
+
+Set `opus-model: claude-opus-5` to get the command's intended tiers back. Both inputs are pinned to a generation rather than the floating `sonnet` / `opus` aliases, so the next generation does not move cost and behaviour for every caller in one release; bump them here, the way `claude-code-action@v1` is bumped here.
 
 #### Testing a change to `code-review.yml`
 
