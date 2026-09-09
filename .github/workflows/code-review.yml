@@ -18,19 +18,56 @@ on:
         type: string
         default: https://github.com/anthropics/claude-code.git
       prompt:
-        description: Instructions for Claude. Defaults to the code-review plugin's slash command against the current PR.
+        description: |
+          Instructions for Claude. Defaults to the code-review plugin's slash command against the
+          current pull request, followed by a narrow override of that command's step 1.
+
+          Step 1 tells the model to stop without reviewing when Claude has already commented on the
+          pull request. That is correct for a slash command a human runs once, and wrong for a
+          workflow that runs on every push: the first run's summary comment turns every later push
+          into a silent no-op — a handful of turns, no output, check green, nothing reviewed. The
+          override lifts that one condition only; step 1's closed / draft / trivial / automated
+          conditions all still apply.
+
+          If you override this input, carry the step 1 override forward. Passing the bare slash
+          command restores the one-review-per-pull-request bug.
         required: false
         type: string
-        default: /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+        # A block scalar is required, not cosmetic: the override has to reach the CLI as a second
+        # paragraph of the same prompt. GitHub preserves the newlines through the `${{ }}`
+        # interpolation into the action's `prompt` input, which arrives as a multiline env var.
+        default: |
+          /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+          Override step 1 of that command on one point only: an earlier review comment from Claude
+          on this pull request is not a reason to stop. Earlier comments reviewed earlier commits,
+          and this workflow runs on every push. Review the current head. Every other stop condition
+          in step 1 — closed, draft, trivial or automated — still applies.
       allowed-tools:
         description: |
-          Comma-separated tool allowlist passed to the Claude CLI as --allowedTools. The default is
-          the union of the code-review plugin's own frontmatter allowlist plus the inline-comment
-          MCP tool. Narrowing it to the MCP tool alone starves the review — it can no longer read
-          the diff or post the summary comment.
+          Comma-separated tool allowlist passed to the Claude CLI as --allowedTools.
+
+          This input is NOT the plugin's `allowed-tools` frontmatter, even though the two lists look
+          alike. In a command's frontmatter the list is ADDITIVE: it adds auto-approvals on top of a
+          session that already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same
+          text becomes the COMPLETE tool set, and every tool absent from it is denied. Copying the
+          frontmatter verbatim therefore inverts its meaning and starves the review — the command's
+          subagents collect the relevant CLAUDE.md paths, audit the diff against them, and validate
+          each candidate finding in the code, none of which is reachable without a file-reading
+          tool. The fan-out still runs and still costs; it just reports "No issues found" having
+          read nothing but `gh pr diff`.
+
+          So this default must be a SUPERSET of what the command's subagents need, not a copy of its
+          frontmatter: the frontmatter entries, plus the inline-comment MCP tool, plus the read-only
+          file tools the frontmatter got for free.
+
+          Keep any addition read-only. `claude-code-action` treats the checked-out pull request head
+          as untrusted — it restores `.claude`, `CLAUDE.md`, `.mcp.json` and friends from the base
+          branch for that reason. Read, Glob and Grep preserve that posture; Write, Edit or a general
+          `Bash(...)` entry would not.
         required: false
         type: string
-        default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*)
+        default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Read,Glob,Grep
       track-progress:
         description: Force tag mode with a tracking comment on the PR.
         required: false

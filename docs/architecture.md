@@ -61,6 +61,14 @@ Because a reusable workflow runs in the **caller's** context, the API key is alw
 
 Two caller-side requirements the reusable cannot enforce from the inside: `id-token: write` is mandatory (the action exchanges the workflow's GitHub OIDC token for a GitHub App token), and `pull-requests: write` is needed to post the review. See `examples/pr-code-review.yml`.
 
+#### Two input defaults that look redundant and are not
+
+Both were shipped broken and diagnosed against a real 1083-line consumer pull request, where five consecutive runs finished green having reviewed nothing. Each looks like something a tidy-minded maintainer would simplify. Don't.
+
+**`allowed-tools` must be a superset of the plugin's frontmatter, not a copy of it.** The `code-review` command declares its own `allowed-tools` in frontmatter, and the first version of this default was that string verbatim plus the inline-comment MCP tool. Same text, inverted meaning: in frontmatter the list is *additive*, layering auto-approvals onto a session that already has Read, Glob and Grep, while as the CLI's `--allowedTools` it is the *complete* tool set and everything absent is denied. The command's subagents collect the relevant CLAUDE.md paths, audit the diff against them, and validate each candidate finding in the code — all of which need a file-reading tool. Starved of one, the fan-out still launches and still bills (one run: 9 turns, $6.46, 41 permission denials) and then reports "No issues found" having read nothing but `gh pr diff`. Hence the trailing `Read,Glob,Grep`. Keep additions read-only: `claude-code-action` treats the checked-out pull request head as untrusted and restores `.claude`, `CLAUDE.md`, `.mcp.json` and friends from the base branch for exactly that reason, so `Write`, `Edit` or a general `Bash(...)` entry would give a pull request author a foothold that the read-only tools do not.
+
+**`prompt` must keep its step 1 override.** Step 1 of the command tells the model to stop without reviewing if Claude has already commented on the pull request — sensible for a slash command a human runs once, wrong for a workflow bound to `synchronize`. Once the first run posts a summary, every later push short-circuits into a silent no-op: a few turns, ~$0.25, no comment, check green. Four pushes on that consumer pull request went unreviewed that way. So the default appends a paragraph lifting that one condition and only that one; closed, draft, trivial and automated all still stop the review. The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt — and a caller that overrides `prompt` with the bare slash command re-introduces the bug for itself.
+
 ### Callers
 
 Each repo has a thin workflow that composes the reusables. The caller owns branch logic (which branch triggers which deploy environment) and nothing else.
