@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.10.0](https://github.com/refokus-agency/platform/compare/v1.9.1...v1.10.0) (2026-09-09)
+
+
+### Features
+
+* keep the review off Opus and stop comments cancelling it ([083e8c2](https://github.com/refokus-agency/platform/commit/083e8c251cf9122294c4689a7d2b4d34e5909812))
+* trigger code review by `[@claude](https://github.com/claude) review` comment only ([35e4c75](https://github.com/refokus-agency/platform/commit/35e4c75973096acab4388d53e7e7e8885c1236a1))
+* trigger code review by `[@claude](https://github.com/claude) review` comment only ([d04e951](https://github.com/refokus-agency/platform/commit/d04e9512ba321495a15523e8b9a248c0d601bb5e))
+
 ## [1.9.1](https://github.com/refokus-agency/platform/compare/v1.9.0...v1.9.1) (2026-09-09)
 
 
