@@ -98,21 +98,33 @@ Federation's safety lives entirely in the **rule's `match` block**, not in keepi
 >
 > — [Use WIF with GitHub Actions](https://platform.claude.com/docs/en/manage-claude/wif-providers/github-actions)
 
-**That warning is about exactly this workflow.** `code-review.yml` runs on `pull_request`, whose OIDC `sub` claim is `repo:<owner>/<repo>:pull_request` — a shape that does not distinguish a fork PR from an internal one.
+**That warning used to be about exactly this workflow, and the comment trigger is what defused it.** The `sub` claim's shape depends on the event. GitHub's [OIDC reference](https://docs.github.com/en/actions/reference/security/oidc) gives the two that matter here:
 
-And the obvious mitigation does not apply here: the docs recommend pinning `claims.ref` to `refs/heads/main`, but a pull request never carries that ref, so a rule pinned that way means the review never authenticates at all. To make code review work you must admit `pull_request`, which is the very event the warning concerns.
+| Trigger | `sub` |
+|---|---|
+| `pull_request` event | `repo:ORG-NAME/REPO-NAME:pull_request` |
+| anything else, no environment | `repo:ORG-NAME/REPO-NAME:ref:refs/heads/BRANCH-NAME` |
 
-Scope to the exact repository, never to the org:
+On the old `pull_request` trigger the review's token carried `…:pull_request` — a shape that does not distinguish a fork PR from an internal one — and the mitigation Anthropic recommends was unavailable: pinning `claims.ref` to `refs/heads/main` meant the review never authenticated at all, because a pull request carries no such ref. You had to admit `pull_request`, the very event the warning concerns.
+
+`issue_comment` is not a pull request event and the job references no environment, so it takes the second row. And because GitHub always runs an `issue_comment` workflow **from the default branch**, that ref is the default branch every time, whatever pull request the comment sits on. So the recommended pin now both works and is exact:
 
 ```json
 "match": {
-  "subject_prefix": "repo:refokus-agency/<repo>:pull_request",
+  "subject_prefix": "repo:refokus-agency/<repo>:ref:refs/heads/main",
   "audience": "https://api.anthropic.com",
-  "claims": { "repository_owner": "refokus-agency" }
+  "claims": {
+    "repository_owner": "refokus-agency",
+    "ref": "refs/heads/main"
+  }
 }
 ```
 
-**On a public repository, prefer the `ANTHROPIC_API_KEY` secret over federation.** This inverts the usual advice, and the reason is worth stating plainly: GitHub *structurally* withholds secrets from fork pull requests — it is a platform guarantee you cannot misconfigure. Federation on a `pull_request` trigger instead depends on you getting the rule's scope exactly right, and a mistake there fails open and silent. Federation is the better choice on private repos, or wherever only org members can open pull requests.
+Scope to the exact repository, never to the org — `repo:your-org/*` is the shape Anthropic's warning names.
+
+(Repositories created after 2026-07-15 use an immutable default subject format that embeds owner and repository IDs. If a rule against a new repo never matches, read the actual `sub` off a run's token before assuming the format above.)
+
+**Federation is now a reasonable choice on a public repo, which it was not before.** The old advice here was to prefer the `ANTHROPIC_API_KEY` secret, because GitHub *structurally* withholds secrets from fork pull requests — a platform guarantee you cannot misconfigure — while a federation rule scoped by hand fails open and silent when you get it wrong. Two things changed. The ref pin above closes the scoping hole properly rather than by hand-waving. And the structural guarantee is gone regardless of which path you pick: `issue_comment` runs with the repository's secrets *always*, even on a fork's pull request, exactly like `pull_request_target` — which is why the reusable refuses to check out a fork head at all (see [architecture.md](architecture.md#why-fork-pull-requests-are-skipped)). Neither path is protected by the platform any more, so pick on the merits: federation has no static key to store, leak or rotate.
 
 **Known limitation.** The reusable exposes only `federation-rule-id` and `anthropic-org-id`. Upstream also accepts `anthropic_service_account_id`, `anthropic_workspace_id` (required when the rule spans multiple workspaces) and `anthropic_oidc_audience`. If your rule needs any of those, the reusable cannot pass them yet — adding them is additive and non-breaking.
 
@@ -120,15 +132,15 @@ Scope to the exact repository, never to the org:
 
 Three things worth knowing before you enable this:
 
-- **`id-token: write` is mandatory in the caller**, on every path — not just federation. The action exchanges the workflow's GitHub OIDC token for a GitHub App token. The reusable cannot detect the omission from the inside; the run just fails. `examples/pr-code-review.yml` grants it.
-- **The API key belongs to the caller, and so does the bill.** A reusable workflow runs in the caller's context with the caller's secrets, so each repo (and each external consumer) pays for its own reviews. The review fans out several parallel agents per PR event, so cost scales with PR activity, not repo count. The trigger deliberately excludes `push` for this reason.
+- **`id-token: write` is mandatory in the caller**, on every path — not just federation. The action exchanges the workflow's GitHub OIDC token for a GitHub App token. The reusable cannot detect the omission from the inside; the run just fails. `examples/comment-code-review.yml` grants it.
+- **The API key belongs to the caller, and so does the bill.** A reusable workflow runs in the caller's context with the caller's secrets, so each repo (and each external consumer) pays for its own reviews. The review fans out several parallel agents per run, and cost scales with how often it runs, not with repo count. That is the whole reason the trigger is a comment and not `pull_request` or `push`: every run is one a human asked for. The `model` and `opus-model` inputs set what those agents run on — the defaults keep the whole fan-out on Sonnet, including the steps the review command asks for Opus by name. See [architecture.md](architecture.md#how-the-review-models-are-chosen).
 - **External consumers should pass secrets explicitly rather than `secrets: inherit`.** `inherit` hands a caller's entire secret set to code in this repo, and `@v1` is a floating tag force-moved on every v1.x release. Inside `refokus-agency` that trust already exists; outside it, prefer:
 
   ```yaml
   permissions:
     contents: read
     pull-requests: write
-    issues: read
+    issues: write     # for the 👀 acknowledgement on the triggering comment
     id-token: write   # mandatory — see the bullet above
 
   jobs:

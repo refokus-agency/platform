@@ -3,6 +3,22 @@ name: Code review (reusable)
 on:
   workflow_call:
     inputs:
+      trigger-phrase:
+        description: |
+          A pull request comment must contain this phrase for the review to run. This is the ONLY
+          way to start a review: the reusable is invoked from `issue_comment`, so nothing happens
+          on push, on open, or on any `pull_request` event.
+
+          Do NOT wire this into claude-code-action's own `trigger_phrase` input — it is a no-op
+          here, because this reusable always passes a `prompt`. The gate lives in the job-level
+          `if:` instead. Read docs/architecture.md#why-the-trigger-phrase-is-checked-here-and-not-by-the-action
+          before changing that.
+
+          Matching is case-sensitive and matches anywhere in the body, so the default fires on
+          "@claude review please" and "hey @claude review this", but not on "@Claude Review".
+        required: false
+        type: string
+        default: '@claude review'
       plugins:
         description: |
           Newline-separated list of Claude Code plugins to install. Newline-separated, NOT
@@ -20,29 +36,48 @@ on:
       prompt:
         description: |
           Instructions for Claude. Defaults to the code-review plugin's slash command against the
-          current pull request, followed by a narrow override of that command's step 1.
+          pull request the triggering comment was posted on, followed by a narrow override of that
+          command's step 1.
 
-          Step 1 tells the model to stop without reviewing when Claude has already commented on the
-          pull request. That is correct for a slash command a human runs once, and wrong for a
-          workflow that runs on every push: the first run's summary comment turns every later push
-          into a silent no-op — a handful of turns, no output, check green, nothing reviewed. The
-          override lifts that one condition only; step 1's closed / draft / trivial / automated
-          conditions all still apply.
+          The override lifts exactly two of step 1's stop conditions — "Claude already commented"
+          and "the pull request is a draft" — because the trigger is itself an explicit human
+          request. Closed, trivial and automated still stop the review. Full argument in
+          docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
 
           If you override this input, carry the step 1 override forward. Passing the bare slash
-          command restores the one-review-per-pull-request bug.
+          command restores the one-review-per-pull-request dead end.
         required: false
         type: string
         # A block scalar is required, not cosmetic: the override has to reach the CLI as a second
         # paragraph of the same prompt. GitHub preserves the newlines through the `${{ }}`
         # interpolation into the action's `prompt` input, which arrives as a multiline env var.
         default: |
-          /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+          /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
-          Override step 1 of that command on one point only: an earlier review comment from Claude
-          on this pull request is not a reason to stop. Earlier comments reviewed earlier commits,
-          and this workflow runs on every push. Review the current head. Every other stop condition
-          in step 1 — closed, draft, trivial or automated — still applies.
+          Override step 1 of that command on two points only. An earlier review comment from
+          Claude on this pull request is not a reason to stop — that comment reviewed an earlier
+          commit, and a human has just asked, by comment, for the current head to be reviewed.
+          Draft status is not a reason to stop either, for the same reason: the request is
+          explicit. Review the current head. Every other stop condition in step 1 — closed,
+          trivial or automated — still applies.
+      model:
+        description: |
+          Model for the ORCHESTRATOR only — the agent that dispatches subagents and posts the
+          comments. Reaches the CLI as --model through claude_args; the action has no `model`
+          input. It is NOT what the review costs: the command names a tier per subagent in its
+          own prompt. See docs/architecture.md#how-the-review-models-are-chosen.
+        required: false
+        type: string
+        default: claude-sonnet-5
+      opus-model:
+        description: |
+          Model ID the `opus` alias resolves to, exported as ANTHROPIC_DEFAULT_OPUS_MODEL. Keeps
+          Opus out of the review, including the bug scans the command requests by alias. Set
+          claude-opus-5 to restore the command's intended tiers; there is no "off" value.
+          See docs/architecture.md#how-the-review-models-are-chosen.
+        required: false
+        type: string
+        default: claude-sonnet-5
       allowed-tools:
         description: |
           Comma-separated tool allowlist passed to the Claude CLI as --allowedTools.
@@ -69,7 +104,13 @@ on:
         type: string
         default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Read,Glob,Grep
       track-progress:
-        description: Force tag mode with a tracking comment on the PR.
+        description: |
+          Force tag mode with a tracking comment on the pull request.
+
+          Leave this false unless you know what you are trading away. On a comment event
+          `track_progress: true` forces TAG mode, and tag mode builds its own prompt from the
+          comment thread instead of running the `prompt` input — so turning it on silently
+          discards the code-review slash command this reusable exists to run.
         required: false
         type: boolean
         default: false
@@ -80,10 +121,13 @@ on:
         default: '1'
       allowed-bots:
         description: |
-          Comma-separated list of bot actors whose pull requests should still be reviewed, or '*'
-          for every bot. Empty (the default) skips bot-authored pull requests green: their diffs
-          are generated (release-please changelog bumps, Renovate lockfile churn), so a review
-          spends tokens on output no human wrote. The `[bot]` suffix is optional in each entry.
+          Comma-separated list of bot actors whose review requests should be honoured, or '*' for
+          every bot. The `[bot]` suffix is optional in each entry.
+
+          Note the change of subject under the comment trigger: the gated actor is now whoever
+          POSTED THE COMMENT, not who opened the pull request. The review bot's own identity is
+          rejected before this input is consulted, so '*' cannot arm a self-trigger loop. Prefer
+          an explicit list anyway.
         required: false
         type: string
         default: ''
@@ -108,9 +152,8 @@ on:
         default: ${{ vars.ANTHROPIC_ORG_ID }}
     secrets:
       # required: false on purpose. A required secret would fail the run at startup for every
-      # caller that hasn't configured it — including Dependabot and fork PRs, which never receive
-      # secrets at all. The "Resolve auth" step below gates on the credential instead, so an
-      # unconfigured caller skips green rather than failing red.
+      # caller that hasn't configured it. The "Resolve auth" step below gates on the credential
+      # instead, so an unconfigured caller skips green rather than failing red.
       ANTHROPIC_API_KEY:
         required: false
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -122,12 +165,27 @@ jobs:
   # `code-review / code-review`. Matches the convention in the sibling reusables: ci.yml uses
   # `checks`, deploy.yml uses `deploy`, release.yml uses `publish`.
   review:
+    # Evaluated before GitHub provisions a runner, so ordinary pull request comments cost
+    # nothing. `github.event.issue.pull_request` distinguishes a pull request comment from a
+    # plain issue comment. The `!= ''` guard matters: `contains(body, '')` is TRUE for every
+    # string, so a blanked `trigger-phrase` would arm on every comment rather than disable the
+    # workflow — blank means off. `secrets` is unavailable here, hence the auth gate is a step.
+    # Don't simplify without reading
+    # docs/architecture.md#why-the-trigger-phrase-is-checked-here-and-not-by-the-action.
+    if: >-
+      github.event.issue.pull_request &&
+      inputs.trigger-phrase != '' &&
+      contains(github.event.comment.body, inputs.trigger-phrase)
     runs-on: ubuntu-latest
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
     # grant it or the run fails at startup. Callers need `contents: read`,
-    # `pull-requests: write`, `issues: read` and `id-token: write`;
-    # see examples/pr-code-review.yml.
+    # `pull-requests: write`, `issues: write` and `id-token: write`;
+    # see examples/comment-code-review.yml.
+    #
+    # Job level, not on the review step — the action's own env block shadows a step-level value.
+    env:
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ inputs.opus-model }}
     steps:
       - name: Resolve auth
         id: auth
@@ -145,7 +203,7 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::[code-review] skipped: no Anthropic credential available. Configure the ANTHROPIC_API_KEY secret (or CLAUDE_CODE_OAUTH_TOKEN, or both the federation-rule-id and anthropic-org-id inputs). This is expected on Dependabot and fork pull requests, which never receive secrets."
+            echo "::notice::[code-review] skipped: no Anthropic credential available. Configure the ANTHROPIC_API_KEY secret (or CLAUDE_CODE_OAUTH_TOKEN, or both the federation-rule-id and anthropic-org-id inputs)."
           fi
         shell: bash
 
@@ -153,15 +211,15 @@ jobs:
         id: actor
         # Gated on the credential so an unconfigured caller never spends an API call here.
         if: steps.auth.outputs.ready == 'true'
-        # Mirrors claude-code-action's own guard (src/github/validation/actor.ts): it resolves
-        # the triggering actor's account type through the Users API and THROWS when the type is
-        # not `User`, unless the actor matches its `allowed_bots` input. Pre-checking the same
-        # condition here is what turns that hard failure into a green skip — without it every
-        # bot-authored pull request (release-please, Renovate) fails red in every caller repo
-        # that has a credential configured.
+        # The comment author must be human (or an allowed bot) AND have write access. Both
+        # checks pre-empt a hard red failure inside claude-code-action, turning it into a green
+        # skip. `author_association` is a deliberate approximation of write access — see
+        # docs/architecture.md#four-gates-all-skipping-green for both failure modes and the
+        # caveat before changing either check.
         env:
           GH_TOKEN: ${{ github.token }}
           ALLOWED_BOTS: ${{ inputs.allowed-bots }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
         run: |
           normalize() {
             printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\[bot\]$//'
@@ -172,43 +230,110 @@ jobs:
           # than failing the pull request — green is the safe direction for an advisory job.
           actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null || echo 'Bot')
 
-          if [ "$actor_type" = 'User' ]; then
+          if [ "$actor_type" != 'User' ]; then
+            # Before allowed-bots, so no configuration can opt into a self-trigger loop.
+            if [ "$(normalize "$GITHUB_ACTOR")" = 'claude' ]; then
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::[code-review] skipped: the review bot cannot request its own review."
+              exit 0
+            fi
+
+            allowed=false
+            trimmed=$(printf '%s' "$ALLOWED_BOTS" | tr -d '[:space:]')
+            if [ "$trimmed" = '*' ]; then
+              allowed=true
+            elif [ -n "$trimmed" ]; then
+              wanted=$(normalize "$GITHUB_ACTOR")
+              IFS=','
+              for bot in $trimmed; do
+                if [ "$(normalize "$bot")" = "$wanted" ]; then
+                  allowed=true
+                  break
+                fi
+              done
+              unset IFS
+            fi
+
+            if [ "$allowed" != true ]; then
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}), not a human. Set the allowed-bots input to honour this bot's requests."
+              exit 0
+            fi
+
+            # An allowed bot is exempt from the write-access check below, matching the action:
+            # it does not verify repository permissions for actors in `allowed_bots`.
             echo "eligible=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          allowed=false
-          trimmed=$(printf '%s' "$ALLOWED_BOTS" | tr -d '[:space:]')
-          if [ "$trimmed" = '*' ]; then
-            allowed=true
-          elif [ -n "$trimmed" ]; then
-            wanted=$(normalize "$GITHUB_ACTOR")
-            IFS=','
-            for bot in $trimmed; do
-              if [ "$(normalize "$bot")" = "$wanted" ]; then
-                allowed=true
-                break
-              fi
-            done
-            unset IFS
-          fi
-
-          if [ "$allowed" = true ]; then
-            echo "eligible=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::[code-review] skipped: pull request triggered by ${GITHUB_ACTOR} (account type: ${actor_type}), not a human. Set the allowed-bots input to review this bot's pull requests anyway."
-          fi
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER | MEMBER | COLLABORATOR)
+              echo "eligible=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR}, whose association with this repository is ${AUTHOR_ASSOCIATION:-NONE}. Requesting a review requires write access."
+              ;;
+          esac
         shell: bash
 
-      - name: Checkout caller repo
+      - name: Resolve pull request
+        id: pr
         if: steps.auth.outputs.ready == 'true' && steps.actor.outputs.eligible == 'true'
+        # Resolves the head SHA explicitly, because `issue_comment` carries no ref and an
+        # unpinned checkout would silently take the DEFAULT BRANCH. Skips forks outright: this
+        # job always holds the repository's secrets, so checking out a fork head would be a
+        # pwn request. Don't simplify either check without reading
+        # docs/architecture.md#why-fork-pull-requests-are-skipped and
+        # docs/architecture.md#why-the-head-sha-is-resolved-explicitly.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          pr=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          head_sha=$(printf '%s' "$pr" | jq -r '.head.sha')
+          head_repo=$(printf '%s' "$pr" | jq -r '.head.repo.full_name // ""')
+          state=$(printf '%s' "$pr" | jq -r '.state')
+
+          if [ "$state" != 'open' ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::[code-review] skipped: pull request #${PR_NUMBER} is ${state}."
+            exit 0
+          fi
+
+          if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::[code-review] skipped: pull request #${PR_NUMBER} comes from the fork ${head_repo:-unknown}. Comment-triggered runs hold this repository's secrets, so a fork head is never checked out."
+            exit 0
+          fi
+
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "head-sha=${head_sha}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Acknowledge request
+        if: steps.pr.outputs.eligible == 'true'
+        # Best-effort 👀 acknowledgement — the only feedback a comment trigger gets while the
+        # review runs. See docs/architecture.md#four-gates-all-skipping-green.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api --silent \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes || echo "::notice::[code-review] could not add the eyes reaction (issues: write not granted). Continuing."
+        shell: bash
+
+      - name: Checkout pull request head
+        if: steps.pr.outputs.eligible == 'true'
         uses: actions/checkout@v7
         with:
+          # Same-repo head only — see the fork gate in "Resolve pull request".
+          ref: ${{ steps.pr.outputs.head-sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Code review
-        if: steps.auth.outputs.ready == 'true' && steps.actor.outputs.eligible == 'true'
+        if: steps.pr.outputs.eligible == 'true'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
         # be exposed as a workflow input. Bump it here when upstream cuts a new major.
         uses: anthropics/claude-code-action@v1
@@ -222,5 +347,6 @@ jobs:
           anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
           anthropic_organization_id: ${{ inputs.anthropic-org-id }}
           allowed_bots: ${{ inputs.allowed-bots }}
-          # v1 has no `allowed_tools` input — the allowlist reaches the CLI through claude_args.
-          claude_args: ${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+          # v1 has neither an `allowed_tools` nor a `model` input — both reach the CLI here.
+          claude_args: >-
+            ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}

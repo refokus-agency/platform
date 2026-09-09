@@ -4,14 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`refokus-agency/platform` is **not an application**. It is a central library of GitHub Actions reusables consumed by every other repo in `refokus-agency`. There is no `package.json`, no build, no test suite, no lint. The "source code" is three reusable workflows plus one composite action:
+`refokus-agency/platform` is **not an application**. It is a central library of GitHub Actions reusables consumed by every other repo in `refokus-agency`. There is no `package.json`, no build, no test suite, no lint. The "source code" is four reusable workflows plus one composite action:
 
 - `.github/workflows/ci.yml` — reusable: lint + typecheck + test + build (each skipped if the caller's `package.json` lacks the script).
 - `.github/workflows/deploy.yml` — reusable: Vercel deploy, parameterized by `environment: preview | stage | production`.
 - `.github/workflows/release.yml` — reusable: `semantic-release` to GitHub Packages.
+- `.github/workflows/code-review.yml` — reusable: AI code review via `anthropics/claude-code-action`. Runs **only** when someone comments the `trigger-phrase` (default `@claude review`) on a pull request; there is no `pull_request` or `push` path.
 - `.github/actions/setup/action.yml` — composite: detects the caller's package manager from the lockfile, installs Node + pm, runs install with caching.
 
-`examples/` holds the **atomic caller workflow files** that downstream repos copy into their own `.github/workflows/`. Naming is `<trigger>-<action>.yml` (`pr-ci.yml`, `pr-preview.yml`, `main-stage.yml`, `main-production.yml`, `production-deploy.yml`, `main-release.yml`). One file = one trigger → one action. Never group by project type; repos mix and match based on their triggers.
+`examples/` holds the **atomic caller workflow files** that downstream repos copy into their own `.github/workflows/`. Naming is `<trigger>-<action>.yml` (`pr-ci.yml`, `pr-preview.yml`, `main-stage.yml`, `main-production.yml`, `production-deploy.yml`, `main-release.yml`, `comment-code-review.yml`). One file = one trigger → one action. Never group by project type; repos mix and match based on their triggers.
 
 ## Blast radius — read before editing
 

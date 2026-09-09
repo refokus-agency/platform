@@ -65,9 +65,11 @@ jobs:
 
 Result: Dependabot PRs get CI green and `deploy-preview` shows as "skipped" (which counts as passing, not failing). Human PRs run both jobs as usual.
 
-## AI code review (`pr-code-review.yml`)
+## AI code review (`comment-code-review.yml`)
 
-Same shape as the Vercel case, solved one level down. Dependabot can't access `ANTHROPIC_API_KEY` either — but `code-review.yml` doesn't need an actor guard in the caller, because its own `Resolve auth` step already gates on whether a credential resolved:
+Not a Dependabot problem at all any more, and worth understanding why the shape differs from the two cases above.
+
+`code-review.yml` runs **only** when a human comments the trigger phrase (default `@claude review`) on a pull request. Dependabot opens pull requests; it does not comment trigger phrases. So a Dependabot PR is never reviewed unless someone deliberately asks — no `if:` guard, no credential gate involved, nothing to configure:
 
 ```yaml
 jobs:
@@ -76,9 +78,14 @@ jobs:
     secrets: inherit
 ```
 
-Result: Dependabot PRs finish green with a `::notice` explaining the skip, no `if:` needed. Gating on the credential rather than on `github.actor` is strictly broader — it covers fork PRs (which also get no secrets) and repos that simply haven't configured a key yet, neither of which an actor guard would catch.
+Result: Dependabot PRs produce no code-review run whatsoever. Not a skipped job, not a green no-op — the workflow's job-level `if:` is false, so GitHub never provisions a runner. Nothing appears on the pull request.
 
-The reusable does carry a second, independent gate on the actor — but for a different reason. `claude-code-action` hard-fails on any non-human actor unless the actor is in its `allowed_bots` list, so `code-review.yml` pre-checks the actor's account type and skips green. That matters most for repos where a credential *is* reachable on a bot run: a release-please or Renovate pull request would otherwise fail red. Dependabot usually skips one step earlier, at the credential gate, and never reaches this one. Pass `allowed-bots` to review a specific bot's pull requests anyway.
+And when you *do* want one — a lockfile bump that touches something load-bearing, a major version jump worth a look — you just comment `@claude review` on the Dependabot PR yourself. That is the ordinary path, not a workaround: the requester is you, a human with write access, so the reusable's actor gate passes on your association and the review runs against the PR head.
+
+Two gates that used to matter here are now mostly historical:
+
+- **The credential gate.** `Resolve auth` still skips green when no Anthropic credential resolves, but Dependabot no longer reaches it. Under the old `pull_request` trigger this was the whole mechanism: Dependabot can't read `ANTHROPIC_API_KEY`, so its PRs skipped there.
+- **`allowed-bots`.** Its subject moved. It used to gate who *opened* the pull request; it now gates who *posted the comment*, so it has nothing to say about a Dependabot PR you review by hand. Leaving it empty is also the loop guard — see [architecture.md](architecture.md#four-gates-all-skipping-green).
 
 ## Defensive layers
 
