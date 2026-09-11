@@ -306,7 +306,15 @@ This default is especially important in the Dependabot flow (see `docs/dependabo
 
 The composite action (`setup`) lives in `platform`. When a reusable runs, the working directory is a checkout of the **caller's** repo — not platform. To use a local composite action path like `./.github/actions/setup`, the reusable needs platform checked out somewhere accessible.
 
-Each reusable does a secondary checkout of `refokus-agency/platform` into `.platform/`, then references `./.platform/.github/actions/setup`. The `platform-ref` input controls which ref to check out (defaults to `main`, matches the workflow's own ref so they don't drift).
+Each reusable does a secondary checkout of `refokus-agency/platform` into `.platform/`, then references `./.platform/.github/actions/setup`. The `platform-ref` input controls which ref to check out, and defaults to `main`.
+
+**That default does not track the ref the caller pinned, and the two can drift.** A caller on `uses: ...@v1` runs the reusable's *definition* from the `v1` tag, but the secondary checkout takes whatever is on platform's `main` at run time — they are independent refs. Consequences worth knowing before you rely on a pin:
+
+- A caller pinned to a released tag picks up later changes to the checked-out files with no version bump.
+- Rolling `@v1` back to an earlier release does not roll back what the secondary checkout fetches.
+- If a file the reusable depends on is moved or deleted on `main`, pinned callers break without having changed anything.
+
+Set `platform-ref` explicitly when you need the reusable and the files it checks out to move together — in particular when pinning for reproducibility rather than for a rollback.
 
 Since `platform` is public, the secondary checkout needs **no custom secret** — the built-in `GITHUB_TOKEN` reaches it, so there is no `GH_PAT_TOKEN` to provision. That was the key change that unblocked Dependabot PRs.
 
