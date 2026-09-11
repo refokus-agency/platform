@@ -168,7 +168,9 @@ If you don't want to set up a GitHub App, two alternatives:
 
 **Symptoms:** someone comments `@claude review`, the check goes green after several minutes, the run billed real money — and no review comment appeared on the pull request. Or one appeared, but it is generic prose with no inline comments, clearly not the output of the `code-review` plugin.
 
-**Diagnosing this from the run log will not work.** The action runs with `show_full_output: false`, so Claude's own output never reaches the log — a deliberate decline and a crash that swallowed its error look identical from the outside. Get the raw transcript and read it turn by turn, looking for `permission_denied`. That is what finally settled [#76](https://github.com/refokus-agency/platform/issues/76) after two plausible-but-wrong fixes.
+**Start with what the run told you.** Since [#79](https://github.com/refokus-agency/platform/issues/79) the `Verify review outcome` step reads the transcript the action leaves behind and comments on the pull request itself when the review did not run, did not finish, or finished without saying anything — so complete silence is no longer one of the shapes this takes. Read that comment first and match it against the causes below.
+
+If you need the turn-by-turn detail, set `show-full-output: true` on your caller and re-run. It defaults to `false` because tool results are unsanitized and a public run log outlives the pull request, so turn it on temporarily and on a private repo. Read the transcript looking for `permission_denied` — that is what finally settled [#76](https://github.com/refokus-agency/platform/issues/76) after two plausible-but-wrong fixes.
 
 **Causes (in order of likelihood):**
 

@@ -130,6 +130,33 @@ on:
         required: false
         type: boolean
         default: false
+      show-full-output:
+        description: |
+          Print Claude's own output — every prompt, every tool call and every tool RESULT — to the
+          run log.
+
+          Leave this false. Tool results are unsanitized: a `gh` call, a file read or a subagent's
+          report can carry a token, a customer name or the contents of a private file, and on a
+          public caller repo the run log is world-readable and outlives the pull request.
+
+          You do not need it to find out how a run ended. The "Verify review outcome" step reads
+          the same transcript on the runner and reports what it finds without reprinting any of
+          it. Turn this on temporarily, on a private repo, only when you need the turn-by-turn
+          detail to debug a run.
+        required: false
+        type: boolean
+        default: false
+      platform-ref:
+        description: |
+          Ref of the platform repo to check out for the guard script that "Verify review outcome"
+          runs. Defaults to 'main', matching the sibling reusables.
+
+          Point it at your branch when testing a change to that script — otherwise the guard runs
+          the copy on main against your workflow. See
+          docs/contributing.md#option-a-test-against-your-branch-in-a-real-repo.
+        required: false
+        type: string
+        default: main
       fetch-depth:
         description: Checkout depth for the caller repo.
         required: false
@@ -142,8 +169,12 @@ on:
 
           Note the change of subject under the comment trigger: the gated actor is now whoever
           POSTED THE COMMENT, not who opened the pull request. The review bot's own identity is
-          rejected before this input is consulted, so '*' cannot arm a self-trigger loop. Prefer
-          an explicit list anyway.
+          rejected before this input is consulted, so '*' cannot arm a self-trigger loop.
+
+          Use an explicit list. '*' is not "a looser allowlist" — it is the only value that
+          honours an actor nobody named, and an allowed bot is EXEMPT from the write-access check
+          that every human request has to pass. Naming the bots you actually run costs one line
+          and keeps that exemption attached to identities you chose.
         required: false
         type: string
         default: ''
@@ -244,7 +275,18 @@ jobs:
           # A 404 means a GitHub App actor with no backing user account, which the action also
           # treats as a bot. A transient API failure lands here too and skips the review rather
           # than failing the pull request — green is the safe direction for an advisory job.
-          actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null || echo 'Bot')
+          #
+          # `actor_lookup` records whether that type was actually CONFIRMED, because "skips the
+          # review" only holds while allowed-bots is empty or an explicit list. The '*' branch
+          # below exempts the actor from the write-access check, so an unverified type must never
+          # reach it: otherwise one API blip turns any commenter into a bot, and '*' hands them an
+          # eligible run holding this repository's secrets.
+          if actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null) && [ -n "$actor_type" ]; then
+            actor_lookup=confirmed
+          else
+            actor_lookup=unconfirmed
+            actor_type='Bot'
+          fi
 
           if [ "$actor_type" != 'User' ]; then
             # Before allowed-bots, so no configuration can opt into a self-trigger loop.
@@ -256,9 +298,16 @@ jobs:
 
             allowed=false
             trimmed=$(printf '%s' "$ALLOWED_BOTS" | tr -d '[:space:]')
-            if [ "$trimmed" = '*' ]; then
+            # The wildcard requires a CONFIRMED bot, since it is the one path that grants without
+            # naming anyone. An explicit list does not need that guard: matching the actor's login
+            # is itself the evidence, because a login identifies exactly one account.
+            if [ "$trimmed" = '*' ] && [ "$actor_lookup" = 'confirmed' ]; then
               allowed=true
-            elif [ -n "$trimmed" ]; then
+            # `!= '*'` is explicit, not redundant: an unconfirmed wildcard falls through to here,
+            # and without it the loop would compare the actor's login against the literal '*'.
+            # That never matches — no login can be '*' — but the list branch should not be reached
+            # by a value that is not a list.
+            elif [ -n "$trimmed" ] && [ "$trimmed" != '*' ]; then
               wanted=$(normalize "$GITHUB_ACTOR")
               IFS=','
               for bot in $trimmed; do
@@ -272,7 +321,7 @@ jobs:
 
             if [ "$allowed" != true ]; then
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}), not a human. Set the allowed-bots input to honour this bot's requests."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means the account lookup itself failed — retry the trigger phrase before changing any input."
               exit 0
             fi
 
@@ -347,8 +396,19 @@ jobs:
           # Same-repo head only — see the fork gate in "Resolve pull request".
           ref: ${{ steps.pr.outputs.head-sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
+          # Load-bearing, and free. Left at its `true` default, checkout writes GITHUB_TOKEN into
+          # this workspace's .git/config as an `http.<host>.extraheader` — and the very next step
+          # points an LLM at the pull request with `Read` granted and `Bash(gh pr comment:*)` on
+          # the allowed-tools default. That is a readable credential and a world-readable write
+          # endpoint in the same context, reachable by anyone who can comment on the pull request
+          # (comments are not gated by the fork and write-access checks above; the head is).
+          #
+          # Nothing in this job needs it: the allowed-tools default grants no `Bash(git ...)`
+          # entry, and `gh` authenticates from GH_TOKEN, never from .git/config.
+          persist-credentials: false
 
       - name: Code review
+        id: review
         if: steps.pr.outputs.eligible == 'true'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
         # be exposed as a workflow input. Bump it here when upstream cuts a new major.
@@ -358,6 +418,7 @@ jobs:
           plugins: ${{ inputs.plugins }}
           plugin_marketplaces: ${{ inputs.plugin-marketplaces }}
           track_progress: ${{ inputs.track-progress }}
+          show_full_output: ${{ inputs.show-full-output }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
@@ -366,3 +427,55 @@ jobs:
           # v1 has neither an `allowed_tools` nor a `model` input — both reach the CLI here.
           claude_args: >-
             ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+
+      - name: Checkout platform repo (for the guard script)
+        # The one consumer this reusable now has for a secondary checkout — see
+        # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
+        #
+        # After the review, not before: the pull request head is untrusted, and platform's files
+        # have no business sitting in the workspace while the review reads it. Sparse, because the
+        # guard script is the only thing needed.
+        #
+        # NOT anonymous, despite platform being public: no `token:` is set, so checkout falls back
+        # to its default of `${{ github.token }}` and authenticates the fetch. That is worth
+        # keeping — an authenticated fetch does not share the runner IP's unauthenticated rate
+        # limit — but it means the credential has to be kept off disk explicitly.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        id: guard-checkout
+        uses: actions/checkout@v7
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          sparse-checkout: .github/scripts
+          # Same reason as the head checkout above, and it matters more here: the very next step
+          # executes a file out of this checkout, so persisting the token would leave it in
+          # `.platform/.git/config` alongside the script that runs. Nothing pushes from here.
+          persist-credentials: false
+
+      - name: Verify review outcome
+        # `always()` is the whole point: the action exits non-zero on a thrown error, and a plain
+        # dependency would skip this step exactly when the caller most needs to hear about it. It
+        # stays gated on the same eligibility output as the review itself, so the four gates above
+        # keep skipping green and in silence.
+        #
+        # This runs AFTER the review and can never block it. Worst case is a red advisory job
+        # carrying an explanation — not a review that did not happen.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REVIEW_CONCLUSION: ${{ steps.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |
+          # Not gated on the checkout step's outcome on purpose: skipping here would be one more
+          # silent green, which is the thing this change exists to delete. If the script is not
+          # on disk, say so and go red — an unverified review is a result the caller has to see.
+          if [ ! -x .platform/.github/scripts/review-guard.sh ]; then
+            echo "::error::[code-review] the guard script is missing (the platform checkout failed, outcome: ${{ steps.guard-checkout.outcome }}). The review's own outcome could not be verified."
+            exit 1
+          fi
+
+          .platform/.github/scripts/review-guard.sh
+        shell: bash
