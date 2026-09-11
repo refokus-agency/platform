@@ -308,7 +308,9 @@ The composite action (`setup`) lives in `platform`. When a reusable runs, the wo
 
 Each reusable does a secondary checkout of `refokus-agency/platform` into `.platform/`, then references `./.platform/.github/actions/setup`. The `platform-ref` input controls which ref to check out (defaults to `main`, matches the workflow's own ref so they don't drift).
 
-Since `platform` is public, the secondary checkout is anonymous — no token is needed. This was the key change that unblocked Dependabot PRs.
+Since `platform` is public, the secondary checkout needs **no custom secret** — the built-in `GITHUB_TOKEN` reaches it, so there is no `GH_PAT_TOKEN` to provision. That was the key change that unblocked Dependabot PRs.
+
+It is not, however, *anonymous*: no `token:` is set on those checkout steps, so `actions/checkout` falls back to its default of `${{ github.token }}` and authenticates the fetch. Keep that — an authenticated fetch avoids the runner IP's shared unauthenticated rate limit — but pair it with `persist-credentials: false`, or checkout writes that token into the checked-out `.git/config` and leaves it on disk for every later step in the job.
 
 An alternative would be to publish the composite action as a standalone GitHub Action on the marketplace and reference it by name. That's overkill — this one's internal.
 

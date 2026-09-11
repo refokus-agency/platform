@@ -396,6 +396,16 @@ jobs:
           # Same-repo head only — see the fork gate in "Resolve pull request".
           ref: ${{ steps.pr.outputs.head-sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
+          # Load-bearing, and free. Left at its `true` default, checkout writes GITHUB_TOKEN into
+          # this workspace's .git/config as an `http.<host>.extraheader` — and the very next step
+          # points an LLM at the pull request with `Read` granted and `Bash(gh pr comment:*)` on
+          # the allowed-tools default. That is a readable credential and a world-readable write
+          # endpoint in the same context, reachable by anyone who can comment on the pull request
+          # (comments are not gated by the fork and write-access checks above; the head is).
+          #
+          # Nothing in this job needs it: the allowed-tools default grants no `Bash(git ...)`
+          # entry, and `gh` authenticates from GH_TOKEN, never from .git/config.
+          persist-credentials: false
 
       - name: Code review
         id: review
@@ -424,7 +434,12 @@ jobs:
         #
         # After the review, not before: the pull request head is untrusted, and platform's files
         # have no business sitting in the workspace while the review reads it. Sparse, because the
-        # guard script is the only thing needed. Anonymous, because platform is public.
+        # guard script is the only thing needed.
+        #
+        # NOT anonymous, despite platform being public: no `token:` is set, so checkout falls back
+        # to its default of `${{ github.token }}` and authenticates the fetch. That is worth
+        # keeping — an authenticated fetch does not share the runner IP's unauthenticated rate
+        # limit — but it means the credential has to be kept off disk explicitly.
         if: always() && steps.pr.outputs.eligible == 'true'
         id: guard-checkout
         uses: actions/checkout@v7
@@ -433,6 +448,10 @@ jobs:
           ref: ${{ inputs.platform-ref }}
           path: .platform
           sparse-checkout: .github/scripts
+          # Same reason as the head checkout above, and it matters more here: the very next step
+          # executes a file out of this checkout, so persisting the token would leave it in
+          # `.platform/.git/config` alongside the script that runs. Nothing pushes from here.
+          persist-credentials: false
 
       - name: Verify review outcome
         # `always()` is the whole point: the action exits non-zero on a thrown error, and a plain
