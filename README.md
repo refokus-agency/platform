@@ -1,10 +1,12 @@
 # platform
 
-Centralized CI/CD for Refokus projects. A single source of truth for reusable GitHub Actions workflows used across all `refokus-agency` repos.
+Reusable GitHub Actions workflows for Node projects: CI, Vercel deploys, semantic-release, and on-demand AI code review. Built and maintained at Refokus, where it runs the CI/CD for every repo in the org.
 
 ## What this is for
 
-Instead of duplicating CI/CD logic across repos, this repo provides three reusable workflows (CI, deploy, release) plus a composite action (setup) that each project consumes with small caller workflow files.
+Instead of duplicating CI/CD logic across repos, this repo provides four reusable workflows (CI, deploy, release, code review) plus a composite action (setup) that each project consumes with small caller workflow files.
+
+It is not Refokus-specific. Anything that runs on Node and deploys to Vercel, releases to npm or GitHub Packages, or just wants a lint/typecheck/test/build gate can point a caller at `@v1` and go. If you are outside `refokus-agency`, read [docs/secrets.md](docs/secrets.md) first: pass secrets explicitly rather than with `secrets: inherit`, and consider pinning a full tag or SHA instead of the floating `@v1`.
 
 ## Quick start
 
@@ -86,4 +88,4 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 ## Support
 
-Ping `@taprile314` or `@beogip`, or open an issue on this repo.
+Open an issue on this repo — that works whether or not you're at Refokus. Refokus folks can also ping `@taprile314` or `@beogip` directly.
