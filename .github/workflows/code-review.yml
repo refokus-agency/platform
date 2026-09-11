@@ -169,8 +169,12 @@ on:
 
           Note the change of subject under the comment trigger: the gated actor is now whoever
           POSTED THE COMMENT, not who opened the pull request. The review bot's own identity is
-          rejected before this input is consulted, so '*' cannot arm a self-trigger loop. Prefer
-          an explicit list anyway.
+          rejected before this input is consulted, so '*' cannot arm a self-trigger loop.
+
+          Use an explicit list. '*' is not "a looser allowlist" — it is the only value that
+          honours an actor nobody named, and an allowed bot is EXEMPT from the write-access check
+          that every human request has to pass. Naming the bots you actually run costs one line
+          and keeps that exemption attached to identities you chose.
         required: false
         type: string
         default: ''
@@ -271,7 +275,18 @@ jobs:
           # A 404 means a GitHub App actor with no backing user account, which the action also
           # treats as a bot. A transient API failure lands here too and skips the review rather
           # than failing the pull request — green is the safe direction for an advisory job.
-          actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null || echo 'Bot')
+          #
+          # `actor_lookup` records whether that type was actually CONFIRMED, because "skips the
+          # review" only holds while allowed-bots is empty or an explicit list. The '*' branch
+          # below exempts the actor from the write-access check, so an unverified type must never
+          # reach it: otherwise one API blip turns any commenter into a bot, and '*' hands them an
+          # eligible run holding this repository's secrets.
+          if actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null) && [ -n "$actor_type" ]; then
+            actor_lookup=confirmed
+          else
+            actor_lookup=unconfirmed
+            actor_type='Bot'
+          fi
 
           if [ "$actor_type" != 'User' ]; then
             # Before allowed-bots, so no configuration can opt into a self-trigger loop.
@@ -283,9 +298,16 @@ jobs:
 
             allowed=false
             trimmed=$(printf '%s' "$ALLOWED_BOTS" | tr -d '[:space:]')
-            if [ "$trimmed" = '*' ]; then
+            # The wildcard requires a CONFIRMED bot, since it is the one path that grants without
+            # naming anyone. An explicit list does not need that guard: matching the actor's login
+            # is itself the evidence, because a login identifies exactly one account.
+            if [ "$trimmed" = '*' ] && [ "$actor_lookup" = 'confirmed' ]; then
               allowed=true
-            elif [ -n "$trimmed" ]; then
+            # `!= '*'` is explicit, not redundant: an unconfirmed wildcard falls through to here,
+            # and without it the loop would compare the actor's login against the literal '*'.
+            # That never matches — no login can be '*' — but the list branch should not be reached
+            # by a value that is not a list.
+            elif [ -n "$trimmed" ] && [ "$trimmed" != '*' ]; then
               wanted=$(normalize "$GITHUB_ACTOR")
               IFS=','
               for bot in $trimmed; do
@@ -299,7 +321,7 @@ jobs:
 
             if [ "$allowed" != true ]; then
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}), not a human. Set the allowed-bots input to honour this bot's requests."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means the account lookup itself failed — retry the trigger phrase before changing any input."
               exit 0
             fi
 
