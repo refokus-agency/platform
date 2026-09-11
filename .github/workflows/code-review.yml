@@ -39,27 +39,42 @@ on:
           pull request the triggering comment was posted on, followed by a narrow override of that
           command's step 1.
 
-          The override lifts exactly two of step 1's stop conditions — "Claude already commented"
-          and "the pull request is a draft" — because the trigger is itself an explicit human
-          request. Closed, trivial and automated still stop the review. Full argument in
+          The override lifts three of step 1's stop conditions — "Claude already commented", "the
+          pull request is a draft" and "the diff is trivial" — and requires the command to post a
+          pull request comment naming any remaining stop condition (closed, automated) before it
+          ends the run. Full argument in
           docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
 
           If you override this input, carry the step 1 override forward. Passing the bare slash
           command restores the one-review-per-pull-request dead end.
         required: false
         type: string
-        # A block scalar is required, not cosmetic: the override has to reach the CLI as a second
-        # paragraph of the same prompt. GitHub preserves the newlines through the `${{ }}`
+        # A block scalar is required, not cosmetic: the override has to reach the CLI as later
+        # paragraphs of the same prompt. GitHub preserves the newlines through the `${{ }}`
         # interpolation into the action's `prompt` input, which arrives as a multiline env var.
+        # The first line must stay the bare slash command.
         default: |
           /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
-          Override step 1 of that command on two points only. An earlier review comment from
+          Override step 1 of that command on three points, and add one requirement to it.
+
+          First, three of its stop conditions do not apply here. An earlier review comment from
           Claude on this pull request is not a reason to stop — that comment reviewed an earlier
           commit, and a human has just asked, by comment, for the current head to be reviewed.
           Draft status is not a reason to stop either, for the same reason: the request is
-          explicit. Review the current head. Every other stop condition in step 1 — closed,
-          trivial or automated — still applies.
+          explicit. Nor is triviality. This workflow has no automatic trigger, so a run exists
+          only because a human asked for one, and that request is already the judgement about
+          whether the change is worth reviewing. A documentation-only diff is in scope: "no code
+          changed" is not "nothing to review".
+
+          Second, whatever you decide, say it on the pull request. If a remaining stop condition
+          does apply — the pull request is closed, or it is an automated one — post a comment
+          naming which condition fired and why, and only then stop. Ending the run without a
+          comment is not an outcome. The person who asked cannot tell a deliberate decline from a
+          broken workflow: this action hides your output from the run log, so a silent success is
+          indistinguishable from a failure that swallowed its error.
+
+          Review the current head.
       model:
         description: |
           Model for the ORCHESTRATOR only — the agent that dispatches subagents and posts the
@@ -83,26 +98,27 @@ on:
           Comma-separated tool allowlist passed to the Claude CLI as --allowedTools.
 
           This input is NOT the plugin's `allowed-tools` frontmatter, even though the two lists look
-          alike. In a command's frontmatter the list is ADDITIVE: it adds auto-approvals on top of a
-          session that already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same
-          text becomes the COMPLETE tool set, and every tool absent from it is denied. Copying the
-          frontmatter verbatim therefore inverts its meaning and starves the review — the command's
-          subagents collect the relevant CLAUDE.md paths, audit the diff against them, and validate
-          each candidate finding in the code, none of which is reachable without a file-reading
-          tool. The fan-out still runs and still costs; it just reports "No issues found" having
-          read nothing but `gh pr diff`.
+          alike. In frontmatter the list is ADDITIVE — it layers auto-approvals onto a session that
+          already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same text becomes
+          the COMPLETE tool set, and every tool absent from it is denied. So keep this default a
+          SUPERSET of that frontmatter, covering both halves of what the command does: the tools
+          that EXECUTE it — `Skill` runs the plugin slash command that this workflow's `prompt`
+          default is, `Task` launches the subagents it fans out to, `TodoWrite` is named in its own
+          notes — and the tools that READ the repo for it, `Read`, `Glob` and `Grep`. Starved of
+          either half the review still runs and still bills; it just reviews nothing.
 
-          So this default must be a SUPERSET of what the command's subagents need, not a copy of its
-          frontmatter: the frontmatter entries, plus the inline-comment MCP tool, plus the read-only
-          file tools the frontmatter got for free.
+          `Agent` is listed beside `Task`, and `SlashCommand` beside `Skill`, on purpose: each pair
+          names one tool that has been spelled both ways across Claude Code versions, and
+          `claude-code-action@v1` pins its own moving CLI version. An entry matching no tool is
+          inert, so naming both costs nothing and stops a CLI bump from silently reinstating this
+          failure. Don't tidy either pair away.
 
-          Keep any addition read-only. `claude-code-action` treats the checked-out pull request head
-          as untrusted — it restores `.claude`, `CLAUDE.md`, `.mcp.json` and friends from the base
-          branch for that reason. Read, Glob and Grep preserve that posture; Write, Edit or a general
-          `Bash(...)` entry would not.
+          Keep any addition read-only — the checked-out pull request head is untrusted, so no
+          `Write`, no `Edit`, no general `Bash(...)` entry. Full argument and the run-level evidence
+          in docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
         required: false
         type: string
-        default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Read,Glob,Grep
+        default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Read,Glob,Grep,Task,Agent,TodoWrite,Skill,SlashCommand
       track-progress:
         description: |
           Force tag mode with a tracking comment on the pull request.
