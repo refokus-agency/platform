@@ -130,6 +130,33 @@ on:
         required: false
         type: boolean
         default: false
+      show-full-output:
+        description: |
+          Print Claude's own output — every prompt, every tool call and every tool RESULT — to the
+          run log.
+
+          Leave this false. Tool results are unsanitized: a `gh` call, a file read or a subagent's
+          report can carry a token, a customer name or the contents of a private file, and on a
+          public caller repo the run log is world-readable and outlives the pull request.
+
+          You do not need it to find out how a run ended. The "Verify review outcome" step reads
+          the same transcript on the runner and reports what it finds without reprinting any of
+          it. Turn this on temporarily, on a private repo, only when you need the turn-by-turn
+          detail to debug a run.
+        required: false
+        type: boolean
+        default: false
+      platform-ref:
+        description: |
+          Ref of the platform repo to check out for the guard script that "Verify review outcome"
+          runs. Defaults to 'main', matching the sibling reusables.
+
+          Point it at your branch when testing a change to that script — otherwise the guard runs
+          the copy on main against your workflow. See
+          docs/contributing.md#option-a-test-against-your-branch-in-a-real-repo.
+        required: false
+        type: string
+        default: main
       fetch-depth:
         description: Checkout depth for the caller repo.
         required: false
@@ -349,6 +376,7 @@ jobs:
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Code review
+        id: review
         if: steps.pr.outputs.eligible == 'true'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
         # be exposed as a workflow input. Bump it here when upstream cuts a new major.
@@ -358,6 +386,7 @@ jobs:
           plugins: ${{ inputs.plugins }}
           plugin_marketplaces: ${{ inputs.plugin-marketplaces }}
           track_progress: ${{ inputs.track-progress }}
+          show_full_output: ${{ inputs.show-full-output }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
@@ -366,3 +395,46 @@ jobs:
           # v1 has neither an `allowed_tools` nor a `model` input — both reach the CLI here.
           claude_args: >-
             ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+
+      - name: Checkout platform repo (for the guard script)
+        # The one consumer this reusable now has for a secondary checkout — see
+        # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
+        #
+        # After the review, not before: the pull request head is untrusted, and platform's files
+        # have no business sitting in the workspace while the review reads it. Sparse, because the
+        # guard script is the only thing needed. Anonymous, because platform is public.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        id: guard-checkout
+        uses: actions/checkout@v7
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          sparse-checkout: .github/scripts
+
+      - name: Verify review outcome
+        # `always()` is the whole point: the action exits non-zero on a thrown error, and a plain
+        # dependency would skip this step exactly when the caller most needs to hear about it. It
+        # stays gated on the same eligibility output as the review itself, so the four gates above
+        # keep skipping green and in silence.
+        #
+        # This runs AFTER the review and can never block it. Worst case is a red advisory job
+        # carrying an explanation — not a review that did not happen.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          REVIEW_CONCLUSION: ${{ steps.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |
+          # Not gated on the checkout step's outcome on purpose: skipping here would be one more
+          # silent green, which is the thing this change exists to delete. If the script is not
+          # on disk, say so and go red — an unverified review is a result the caller has to see.
+          if [ ! -x .platform/.github/scripts/review-guard.sh ]; then
+            echo "::error::[code-review] the guard script is missing (the platform checkout failed, outcome: ${{ steps.guard-checkout.outcome }}). The review's own outcome could not be verified."
+            exit 1
+          fi
+
+          .platform/.github/scripts/review-guard.sh
+        shell: bash

@@ -152,6 +152,8 @@ Moving from `pull_request` to `issue_comment` changed the **caller contract** �
 
 It shipped on the **v1** line as `feat:` anyway, as a deliberate, bounded exception: release-please treats this repo as a single package, so a major would have bumped `ci.yml`, `deploy.yml` and `release.yml` to `v2` as well and frozen every repo pinned at `@v1` on the last v1 release until each one re-pinned four caller files. `code-review.yml` had exactly one consumer, updated alongside this change. If `code-review.yml` ever has more than a couple of consumers, that exception stops being available and the next such change needs a real major.
 
+Fixing [#79](https://github.com/refokus-agency/platform/issues/79) raised the same question again and was answered the same way. The guard step can fail the job on two paths that previously finished green and silent — a review that did not run, and one whose outcome cannot be verified — and a caller could in principle have depended on this check never going red. It ships as `fix:` because the job could **already** go red (the action calls `core.setFailed` on a thrown error), because the `workflow_call` interface is untouched and purely additive, and because the green those two paths used to return was the bug being fixed rather than behaviour worth preserving. A caller that wants an advisory-only review keeps it out of its required status checks.
+
 The same exception covered a later fix to the two defaults below. Fixing a default that never worked is the easier case of the two: there is no behaviour for a consumer to depend on, so it ships as `fix:` as long as the `workflow_call` interface — input names, types, `required` flags — is untouched.
 
 #### Two input defaults that look redundant and are not
@@ -176,6 +178,8 @@ Keep additions read-only: `claude-code-action` treats the checked-out pull reque
 `trivial` carries the sharpest version of the argument. This workflow has no automatic trigger, so a run exists *only* because a person decided the change was worth reviewing; the gate then re-decides that from the diff alone and silently overrules them. A documentation-only diff is reviewable material: "no code changed" is not "nothing to review".
 
 The silent half is the worse half, and it is not specific to `trivial`. The action runs with `show_full_output: false`, so Claude's reasoning never reaches the run log and a deliberate decline is indistinguishable from a crash that swallowed its error. So the override adds one requirement on top of the three liftings: whatever the command decides, it says so in a pull request comment before the run ends. Closed and automated still stop the review — they just stop it out loud.
+
+That requirement is an *instruction*, and an instruction only binds a model that is still running — which is precisely the case it was written to cover. So since [#79](https://github.com/refokus-agency/platform/issues/79) the same guarantee is also enforced from outside the model: the `Verify review outcome` step reads the transcript the action leaves behind and comments itself when the review did not run, did not finish, or finished without saying anything. The `show-full-output` input is the debugging escape hatch for the same blindness; it defaults to `false` because tool results are unsanitized and a public run log outlives the pull request.
 
 The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt, and the first line has to stay the bare slash command — and a caller that overrides `prompt` with that bare command re-introduces the bug for itself.
 
@@ -308,13 +312,13 @@ Since `platform` is public, the secondary checkout is anonymous — no token is 
 
 An alternative would be to publish the composite action as a standalone GitHub Action on the marketplace and reference it by name. That's overkill — this one's internal.
 
-### Why does `code-review.yml` skip the platform re-checkout?
+### Why `code-review.yml`'s platform checkout is not like the others
 
-It is the one reusable that does **not** check out `refokus-agency/platform` into `.platform/`. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above.
+It is the one reusable that does not check out `refokus-agency/platform` into `.platform/` **for the composite `setup` action**. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above. Since [#79](https://github.com/refokus-agency/platform/issues/79) it does take a secondary checkout — for the guard script, and for nothing else.
 
-The secondary checkout exists for exactly one reason: reaching the local composite `setup` action. `code-review.yml` never calls `setup` — `claude-code-action` ships its own runtime and installs what it needs. Worse, calling `setup` here would hard-fail: it detects the package manager from a lockfile, and `platform` has no `package.json` at all, so it would exit with `::error::No lockfile found`.
+In the other reusables that checkout exists for exactly one reason: reaching the local composite `setup` action. `code-review.yml` never calls `setup` — `claude-code-action` ships its own runtime and installs what it needs. Worse, calling `setup` here would hard-fail: it detects the package manager from a lockfile, and `platform` has no `package.json` at all, so it would exit with `::error::No lockfile found`.
 
-A checkout with no consumer is just latency and one more moving part. So this reusable checks out the caller repo and nothing else.
+A checkout with no consumer is just latency and one more moving part — which held exactly until the guard step gave it one. So the checkout it does take is kept as narrow as the need: sparse (`.github/scripts` only), and placed *after* the review rather than before it, so platform's files are not sitting in the workspace while the review reads an untrusted pull request head. `setup` is still never called here, which is the half of this that was always load-bearing.
 
 ### Why is `platform` public?
 
