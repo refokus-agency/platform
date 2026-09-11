@@ -164,6 +164,21 @@ If you don't want to set up a GitHub App, two alternatives:
 - Verify the caller's `@v1` ref is actually pulling latest by checking the reusable's first step in the logs — the action URL includes a SHA.
 - If the consumer needs a fix urgently and the release-please cycle is too slow, temporarily switch the caller to `@main` (or a specific commit SHA) until the next release lands.
 
+## Code review finishes green but posts no comment
+
+**Symptoms:** someone comments `@claude review`, the check goes green after several minutes, the run billed real money — and no review comment appeared on the pull request. Or one appeared, but it is generic prose with no inline comments, clearly not the output of the `code-review` plugin.
+
+**Diagnosing this from the run log will not work.** The action runs with `show_full_output: false`, so Claude's own output never reaches the log — a deliberate decline and a crash that swallowed its error look identical from the outside. Get the raw transcript and read it turn by turn, looking for `permission_denied`. That is what finally settled [#76](https://github.com/refokus-agency/platform/issues/76) after two plausible-but-wrong fixes.
+
+**Causes (in order of likelihood):**
+
+1. **Your caller overrides `allowed-tools` with a value that predates [#76](https://github.com/refokus-agency/platform/issues/76)**, which omits `Skill`. The `prompt` default *is* a slash command and `Skill` is the tool that executes one; denied, the orchestrator improvises a review from the prompt's plain English instead. Tell-tale: not one `Task` call anywhere in the transcript.
+2. **Your override omits `Task`.** The command is built from subagents — two triage agents, a change summariser, four parallel reviewers, one validator per finding — and none of them launch. Tell-tale: `modelUsage` carries a single model entry, when the command mandates two haiku triage agents before it reaches the diff.
+3. **Your caller overrides `prompt` with the bare slash command.** That drops the step 1 override and restores both the one-review-per-pull-request dead end and the `trivial` stop.
+4. **A stop condition legitimately fired** — the pull request is closed, or automated. Since [#76](https://github.com/refokus-agency/platform/issues/76) the `prompt` default requires the command to post a comment naming the condition before stopping, so *complete* silence is not this.
+
+**Fix:** drop the override and inherit the defaults — that is what they are for, and neither [examples/comment-code-review.yml](../examples/comment-code-review.yml) nor this repo's own caller overrides either input. If you genuinely need to override, copy the current default out of [.github/workflows/code-review.yml](../.github/workflows/code-review.yml) verbatim and add to it rather than writing one from scratch. Full argument in [architecture.md → Two input defaults that look redundant and are not](architecture.md#two-input-defaults-that-look-redundant-and-are-not).
+
 ## Still stuck
 
 - Re-read [architecture.md](architecture.md) to check whether you're fighting the design.
