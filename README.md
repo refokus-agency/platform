@@ -6,8 +6,6 @@ Reusable GitHub Actions workflows for Node projects: CI, Vercel deploys, semanti
 
 Instead of duplicating CI/CD logic across repos, this repo provides four reusable workflows (CI, deploy, release, code review) plus a composite action (setup) that each project consumes with small caller workflow files.
 
-It is not Refokus-specific. Anything that runs on Node and deploys to Vercel, releases to npm or GitHub Packages, or just wants a lint/typecheck/test/build gate can point a caller at `@v1` and go. If you are outside `refokus-agency`, read [docs/secrets.md](docs/secrets.md) first: pass secrets explicitly rather than with `secrets: inherit`, and consider pinning a full tag or SHA instead of the floating `@v1`.
-
 ## Quick start
 
 Pick the workflow files that match **the triggers your repo cares about** and copy them from [`examples/`](examples/) into `.github/workflows/` in your repo. Each file is one trigger → one action, so nothing gets skipped in the UI.
