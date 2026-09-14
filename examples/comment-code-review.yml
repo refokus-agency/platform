@@ -24,15 +24,14 @@ permissions:
   # from the inside, so it has to be granted here.
   id-token: write
 
-concurrency:
-  # `github.event.issue.number` IS the pull request number on `issue_comment` — the payload
-  # carries no `pull_request` object, so the usual `github.event.pull_request.number` is empty
-  # here and would collapse every pull request into one concurrency group.
-  group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  # false, not true: `concurrency` is per-run and the phrase is checked in the reusable's job
-  # `if:`, so ANY comment joins the group and `true` would cancel a running review.
-  # See docs/architecture.md#why-the-caller-sets-cancel-in-progress-false.
-  cancel-in-progress: false
+# No `concurrency:` here on purpose. Serialization is owned by the reusable, which is the only
+# place that knows the trigger phrase — a workflow-level `concurrency` cannot read the reusable's
+# `inputs`, so any group you write here takes in every comment in the repo, not just review
+# requests. Worse, GitHub cancels a PENDING run in a group unconditionally, so `cancel-in-progress:
+# false` does not save a queued review from an unrelated "thanks, fixing that" comment.
+#
+# A block here would apply ON TOP OF the reusable's job-level group and reintroduce exactly that
+# bug. See docs/architecture.md#why-serialization-lives-in-the-reusable-not-the-caller.
 
 jobs:
   code-review:
