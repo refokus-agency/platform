@@ -40,13 +40,14 @@ on:
           command's step 1.
 
           The override lifts three of step 1's stop conditions — "Claude already commented", "the
-          pull request is a draft" and "the diff is trivial" — and requires the command to post a
+          pull request is a draft" and "the diff is trivial" — requires the command to post a
           pull request comment naming any remaining stop condition (closed, automated) before it
-          ends the run. Full argument in
-          docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
+          ends the run, and requires the review's fan-out to run in the foreground. Full argument
+          in docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
 
-          If you override this input, carry the step 1 override forward. Passing the bare slash
-          command restores the one-review-per-pull-request dead end.
+          If you override this input, carry all three parts forward. Passing the bare slash
+          command restores the one-review-per-pull-request dead end AND reintroduces the silent
+          background fan-out of #91.
         required: false
         type: string
         # A block scalar is required, not cosmetic: the override has to reach the CLI as later
@@ -56,7 +57,7 @@ on:
         default: |
           /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
-          Override step 1 of that command on three points, and add one requirement to it.
+          Override step 1 of that command on three points, and add two requirements to it.
 
           First, three of its stop conditions do not apply here. An earlier review comment from
           Claude on this pull request is not a reason to stop — that comment reviewed an earlier
@@ -73,6 +74,16 @@ on:
           comment is not an outcome. The person who asked cannot tell a deliberate decline from a
           broken workflow: this action hides your output from the run log, so a silent success is
           indistinguishable from a failure that swallowed its error.
+
+          Third, run your review agents in the FOREGROUND. Launch each one so that you wait for
+          its result in the same turn, and never end a turn while an agent is still running. The
+          Agent tool's launch mode defaults to background when you do not ask for one, and a
+          background launch hands you a receipt instead of a result — which leaves you free to
+          finish. Here, finishing is fatal: nothing follows you in this run, so ending your turn
+          to await completion notifications terminates the run and kills every reviewer before it
+          reports. That failure is invisible from the outside — a green check, zero findings
+          collected and no comment. Collect every agent's findings yourself, in-turn, before you
+          write anything on the pull request.
 
           Review the current head.
       model:
