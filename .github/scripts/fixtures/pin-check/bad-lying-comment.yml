@@ -1,0 +1,8 @@
+# A real v7.0.1 commit wearing a v1.0.0 label. This is what --verify-comment is for:
+# without it, a pin can be made to look like a version it is not. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v1.0.0

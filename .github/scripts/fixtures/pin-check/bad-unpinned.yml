@@ -1,0 +1,7 @@
+# A floating tag — the exact thing the gate exists to stop. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7

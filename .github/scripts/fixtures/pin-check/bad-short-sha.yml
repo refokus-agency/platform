@@ -1,0 +1,7 @@
+# An abbreviated SHA is ambiguous and can be forced to collide. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e # v7.0.1
