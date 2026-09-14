@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.10.3](https://github.com/refokus-agency/platform/compare/v1.10.2...v1.10.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* **code-review:** require the review fan-out to run in the foreground ([#92](https://github.com/refokus-agency/platform/issues/92)) ([019a09c](https://github.com/refokus-agency/platform/commit/019a09cacc7a97a4ce49fe3b1ec676d2d6f7a0fe))
+
 ## [1.10.2](https://github.com/refokus-agency/platform/compare/v1.10.1...v1.10.2) (2026-09-11)
 
 
