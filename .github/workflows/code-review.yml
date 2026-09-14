@@ -110,8 +110,9 @@ on:
 
           This input is NOT the plugin's `allowed-tools` frontmatter, even though the two lists look
           alike. In frontmatter the list is ADDITIVE — it layers auto-approvals onto a session that
-          already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same text becomes
-          the COMPLETE tool set, and every tool absent from it is denied. So keep this default a
+          already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same text is the
+          session's ONLY source of approval: the run is headless, so a tool that needs permission
+          and matches no entry is denied outright rather than prompting. So keep this default a
           SUPERSET of that frontmatter, covering both halves of what the command does: the tools
           that EXECUTE it — `Skill` runs the plugin slash command that this workflow's `prompt`
           default is, `Task` launches the subagents it fans out to, `TodoWrite` is named in its own
@@ -123,6 +124,19 @@ on:
           `claude-code-action@v1` pins its own moving CLI version. An entry matching no tool is
           inert, so naming both costs nothing and stops a CLI bump from silently reinstating this
           failure. Don't tidy either pair away.
+
+          Do not read this list as the complete inventory of what the run can do. It gates
+          permission, not availability: the session still exposes the full tool set, and two things
+          reach past the list — tools that need no approval at all, and a built-in set of read-only
+          shell commands. Audit the transcript, not this default.
+
+          Two more reasons an allowed tool still gets denied, neither of them fixable here. A
+          prefix rule such as `Bash(gh pr diff:*)` refuses to match a command carrying shell
+          constructs — a loop, a `$?`, a redirection — because they can smuggle a second command
+          past the prefix; that denial reads `Contains for_statement` or `Contains
+          simple_expansion` in the transcript, and widening this list does nothing for it. And a
+          subagent inherits this same allowlist, so a reviewer that needs to reach outside it
+          (unpacking a vendored tarball, say) is blocked exactly like the orchestrator.
 
           Keep any addition read-only — the checked-out pull request head is untrusted, so no
           `Write`, no `Edit`, no general `Bash(...)` entry. Full argument and the run-level evidence
