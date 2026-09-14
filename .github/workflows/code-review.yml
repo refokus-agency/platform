@@ -40,13 +40,14 @@ on:
           command's step 1.
 
           The override lifts three of step 1's stop conditions — "Claude already commented", "the
-          pull request is a draft" and "the diff is trivial" — and requires the command to post a
+          pull request is a draft" and "the diff is trivial" — requires the command to post a
           pull request comment naming any remaining stop condition (closed, automated) before it
-          ends the run. Full argument in
-          docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
+          ends the run, and requires the review's fan-out to run in the foreground. Full argument
+          in docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
 
-          If you override this input, carry the step 1 override forward. Passing the bare slash
-          command restores the one-review-per-pull-request dead end.
+          If you override this input, carry all three parts forward. Passing the bare slash
+          command restores the one-review-per-pull-request dead end AND reintroduces the silent
+          background fan-out of #91.
         required: false
         type: string
         # A block scalar is required, not cosmetic: the override has to reach the CLI as later
@@ -56,7 +57,7 @@ on:
         default: |
           /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
-          Override step 1 of that command on three points, and add one requirement to it.
+          Override step 1 of that command on three points, and add two requirements to it.
 
           First, three of its stop conditions do not apply here. An earlier review comment from
           Claude on this pull request is not a reason to stop — that comment reviewed an earlier
@@ -73,6 +74,16 @@ on:
           comment is not an outcome. The person who asked cannot tell a deliberate decline from a
           broken workflow: this action hides your output from the run log, so a silent success is
           indistinguishable from a failure that swallowed its error.
+
+          Third, run your review agents in the FOREGROUND. Launch each one so that you wait for
+          its result in the same turn, and never end a turn while an agent is still running. The
+          Agent tool's launch mode defaults to background when you do not ask for one, and a
+          background launch hands you a receipt instead of a result — which leaves you free to
+          finish. Here, finishing is fatal: nothing follows you in this run, so ending your turn
+          to await completion notifications terminates the run and kills every reviewer before it
+          reports. That failure is invisible from the outside — a green check, zero findings
+          collected and no comment. Collect every agent's findings yourself, in-turn, before you
+          write anything on the pull request.
 
           Review the current head.
       model:
@@ -99,8 +110,9 @@ on:
 
           This input is NOT the plugin's `allowed-tools` frontmatter, even though the two lists look
           alike. In frontmatter the list is ADDITIVE — it layers auto-approvals onto a session that
-          already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same text becomes
-          the COMPLETE tool set, and every tool absent from it is denied. So keep this default a
+          already has Read, Glob and Grep. Reaching the CLI as --allowedTools the same text is the
+          session's ONLY source of approval: the run is headless, so a tool that needs permission
+          and matches no entry is denied outright rather than prompting. So keep this default a
           SUPERSET of that frontmatter, covering both halves of what the command does: the tools
           that EXECUTE it — `Skill` runs the plugin slash command that this workflow's `prompt`
           default is, `Task` launches the subagents it fans out to, `TodoWrite` is named in its own
@@ -112,6 +124,19 @@ on:
           `claude-code-action@v1` pins its own moving CLI version. An entry matching no tool is
           inert, so naming both costs nothing and stops a CLI bump from silently reinstating this
           failure. Don't tidy either pair away.
+
+          Do not read this list as the complete inventory of what the run can do. It gates
+          permission, not availability: the session still exposes the full tool set, and two things
+          reach past the list — tools that need no approval at all, and a built-in set of read-only
+          shell commands. Audit the transcript, not this default.
+
+          Two more reasons an allowed tool still gets denied, neither of them fixable here. A
+          prefix rule such as `Bash(gh pr diff:*)` refuses to match a command carrying shell
+          constructs — a loop, a `$?`, a redirection — because they can smuggle a second command
+          past the prefix; that denial reads `Contains for_statement` or `Contains
+          simple_expansion` in the transcript, and widening this list does nothing for it. And a
+          subagent inherits this same allowlist, so a reviewer that needs to reach outside it
+          (unpacking a vendored tarball, say) is blocked exactly like the orchestrator.
 
           Keep any addition read-only — the checked-out pull request head is untrusted, so no
           `Write`, no `Edit`, no general `Bash(...)` entry. Full argument and the run-level evidence
