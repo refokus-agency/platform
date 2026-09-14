@@ -1,0 +1,15 @@
+# The gate must reject a file it cannot parse — not quietly skip it.
+#
+# The unpinned `uses:` below is the point: before the parse status was checked, yq
+# failed, the reader got zero lines, and this file scored zero findings. A green run
+# over a file nobody read is worse than a red one.
+#
+# The defect is the tab indenting the last line. yq rejects a tab in indentation.
+name: unparseable
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+	broken: [

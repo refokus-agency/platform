@@ -100,7 +100,12 @@ fi
 # eight times at the same version; without this the gate would make eight identical API
 # calls. A file rather than an associative array, because macOS still ships bash 3.2.
 CACHE_FILE="$(mktemp)"
-trap 'rm -f "$CACHE_FILE"' EXIT
+
+# One file's worth of extracted refs. It exists so that extract_refs is *not* consumed
+# through a process substitution — see the note in check_file.
+REFS_FILE="$(mktemp)"
+
+trap 'rm -f "$CACHE_FILE" "$REFS_FILE"' EXIT
 
 # Every `uses:` in a file, as `ref<TAB>trailing-comment`, one per line.
 #
@@ -186,6 +191,19 @@ check_file() {
   local ref comment version repo sha actual line resolved
   FILE_FINDINGS=0
 
+  # Extract into a file and check the status, rather than reading from `< <(extract_refs)`.
+  # The shell never checks a process substitution's exit code and `set -e` does not reach
+  # inside one, so a file yq cannot parse would simply yield zero lines: zero findings,
+  # and a green run over a file whose refs were never looked at. That is the same
+  # fail-open the API path already refuses — a gate that silently skips what it cannot
+  # read is not a gate — and it is not theoretical: yq rejects a tab in indentation, and
+  # a single stray tab was enough to walk an unpinned ref straight past the check.
+  if ! extract_refs "$file" >"$REFS_FILE"; then
+    err "$file" 1 "could not be parsed, so its action references were never checked. Fix the YAML (yq's error is above); the gate will not pass a file it cannot read."
+    FILE_FINDINGS=1
+    return 0
+  fi
+
   while IFS=$'\t' read -r ref comment; do
     [[ -n "$ref" ]] || continue
 
@@ -241,7 +259,7 @@ check_file() {
         FILE_FINDINGS=$((FILE_FINDINGS + 1))
         ;;
     esac
-  done < <(extract_refs "$file")
+  done <"$REFS_FILE"
 }
 
 # The files the gate is responsible for. Composite actions are found at any depth: a
