@@ -24,15 +24,6 @@ permissions:
   # from the inside, so it has to be granted here.
   id-token: write
 
-# No `concurrency:` here on purpose. Serialization is owned by the reusable, which is the only
-# place that knows the trigger phrase — a workflow-level `concurrency` cannot read the reusable's
-# `inputs`, so any group you write here takes in every comment in the repo, not just review
-# requests. Worse, GitHub cancels a PENDING run in a group unconditionally, so `cancel-in-progress:
-# false` does not save a queued review from an unrelated "thanks, fixing that" comment.
-#
-# A block here would apply ON TOP OF the reusable's job-level group and reintroduce exactly that
-# bug. See docs/architecture.md#why-serialization-lives-in-the-reusable-not-the-caller.
-
 jobs:
   code-review:
     uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
