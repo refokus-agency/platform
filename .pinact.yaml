@@ -9,8 +9,19 @@
 # Pinning them here would break the templates for every consumer repo.
 version: 3
 
+# The composite-action patterns are enumerated per nesting level, not recursive.
+# pinact matches these with Go's path.Match, where `*` never crosses a `/` and `**`
+# is not special — verified, not assumed: with only the one-level pattern, a nested
+# `.github/actions/vercel/deploy/action.yml` is silently skipped, and `**` does not
+# rescue it. Both gate scripts walk .github/actions/ at ANY depth, so without the
+# second level a contributor adding a grouped composite action would hit a red gate
+# with no sanctioned way to fix it — `pinact run` would not touch the file, and
+# hand-typing a SHA is the one thing this convention forbids.
+# Add the next level here if a layout ever needs it.
 files:
   - pattern: .github/workflows/*.yml
   - pattern: .github/workflows/*.yaml
   - pattern: .github/actions/*/action.yml
   - pattern: .github/actions/*/action.yaml
+  - pattern: .github/actions/*/*/action.yml
+  - pattern: .github/actions/*/*/action.yaml
