@@ -3,6 +3,10 @@
 #
 # workflow_dispatch is kept as an escape hatch — lets you re-run a stage
 # deploy from the Actions tab without pushing a new commit.
+#
+# Every `secrets: inherit` below — there is one per job — assumes your repo is in the
+# refokus-agency org. Calling from another organization? Swap each one for an explicit
+# secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
 
 name: Deploy Stage
 

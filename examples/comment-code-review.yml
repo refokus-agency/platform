@@ -5,6 +5,10 @@
 # when a human asks. Ask again after a push to re-review the new head. No guards are needed in
 # this file: the reusable's own gates handle the credential, actor and fork checks and skip green
 # with a reason in the run log. See docs/architecture.md#four-gates-all-skipping-green.
+#
+# Every `secrets: inherit` below — there is one per job — assumes your repo is in the
+# refokus-agency org. Calling from another organization? Swap each one for an explicit
+# secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
 
 name: Code Review
 
