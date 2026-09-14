@@ -454,12 +454,12 @@ jobs:
             ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
 
       - name: Checkout platform repo (for the guard script)
-        # The one consumer this reusable now has for a secondary checkout — see
+        # The only two consumers this reusable has for a secondary checkout — see
         # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
         #
         # After the review, not before: the pull request head is untrusted, and platform's files
         # have no business sitting in the workspace while the review reads it. Sparse, because the
-        # guard script is the only thing needed.
+        # guard script and the telemetry script are the only things needed.
         #
         # NOT anonymous, despite platform being public: no `token:` is set, so checkout falls back
         # to its default of `${{ github.token }}` and authenticates the fetch. That is worth
@@ -503,4 +503,31 @@ jobs:
           fi
 
           .platform/.github/scripts/review-guard.sh
+        shell: bash
+
+      - name: Report run telemetry
+        # Same gate as the guard above, and for the same reason: `always()` because the money is
+        # spent whether or not the review finished, and the same `eligible` output so the four
+        # gates keep skipping green and in silence.
+        #
+        # `continue-on-error` is the second of two independent guards. The script itself cannot
+        # exit non-zero — read the contract at the top of it — and this is the belt to that
+        # brace. Telemetry is additive information, never a verdict, and `@v1` is force-moved
+        # onto every consumer repo in the org, so no bug in here may ever redden a caller's CI.
+        # The guard step above deliberately does NOT carry this; don't copy it upward.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+        run: |
+          # Unlike the guard, a missing script is a notice and not an error. An unverified review
+          # is a result the caller has to see; an unreported cost is not.
+          if [ ! -x .platform/.github/scripts/report-run-telemetry.sh ]; then
+            echo "::notice::[code-review] telemetry: the reporting script is missing (the platform checkout failed, outcome: ${{ steps.guard-checkout.outcome }}). Skipping."
+            exit 0
+          fi
+
+          .platform/.github/scripts/report-run-telemetry.sh
         shell: bash
