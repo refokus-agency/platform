@@ -1,0 +1,8 @@
+# The comment restates the pinned SHA, which clears `^v?[0-9]` (this SHA starts with a
+# digit) and then verifies itself. Decidable offline. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 3d3c42e5aac5ba805825da76410c181273ba90b1

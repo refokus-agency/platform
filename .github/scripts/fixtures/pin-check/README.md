@@ -16,6 +16,12 @@ reasons, both load-bearing:
 different release, so verifying it requires the GitHub API. Every other case is
 decidable offline.
 
+The three `*-sha-as-comment.yml` files cover a tautology the gate had: the commits
+endpoint echoes a SHA ref back, so a comment restating the pin verified itself. They are
+three because each defeated the check differently — full SHA, abbreviation (the API
+resolves from 5 characters), and abbreviation with a leading `v` (rejected by the API
+alone, so it passed under `--no-api`). All are decidable offline.
+
 `bad-unparseable.yml` is not malformed by accident. It is the regression test for a
 fail-open the gate actually had: `yq` rejected the file, the reader got zero lines, the
 file scored zero findings, and the run went green over an unpinned `uses:` nobody had

@@ -11,7 +11,7 @@
 #
 # What it checks, per third-party `uses:`:
 #   1. the ref is `owner/repo[/subpath]@<40-hex>` — a tag, a branch or a short SHA fails
-#   2. a trailing comment exists and names a version
+#   2. a trailing comment exists and names a version, rather than restating the SHA
 #   3. that version actually resolves to the pinned commit
 #
 # Step 3 is the half that is easy to skip and expensive to lose. Without it a pin can be
@@ -197,7 +197,7 @@ line_of() {
 FILE_FINDINGS=0
 check_file() {
   local file="$1"
-  local ref comment version repo sha actual line resolved
+  local ref comment version lower_version repo sha actual line resolved
   FILE_FINDINGS=0
 
   # Extract into a file and check the status, rather than reading from `< <(extract_refs)`.
@@ -243,10 +243,26 @@ check_file() {
       continue
     fi
 
+    sha="${ref##*@}"
+
+    # The commits endpoint takes a SHA as its ref and echoes it back, so a comment that
+    # restates the pin verifies itself against any commit at all, tagged or not. `^v?[0-9]`
+    # does not catch it: a SHA starting with a digit matches as readily as `7.0.1`.
+    #
+    # Hence any prefix rather than the whole SHA — the API resolves abbreviations from 5
+    # characters — with the floor at git's minimum of 4 so the rule does not rest on where
+    # GitHub draws that line today. The leading `v` goes because `# v3d3c42e` is the same
+    # restatement, and having only the API reject it left it passing under --no-api.
+    lower_version="$(printf '%s' "${version#v}" | tr '[:upper:]' '[:lower:]')"
+    if [[ ${#lower_version} -ge 4 && "$sha" == "$lower_version"* ]]; then
+      err "$file" "$line" "'${ref}' has the trailing comment '${comment}', which restates the pinned SHA instead of naming a version. Comparing a SHA to itself verifies nothing — name the tag the pin came from."
+      FILE_FINDINGS=$((FILE_FINDINGS + 1))
+      continue
+    fi
+
     [[ $NO_API -eq 1 ]] && continue
 
     repo="$(printf '%s' "${ref%@*}" | cut -d/ -f1,2)"
-    sha="${ref##*@}"
 
     resolved=0
     actual="$(resolve_version "$repo" "$version")" || resolved=$?
