@@ -191,6 +191,40 @@ Whether the race is lost is a matter of pacing rather than configuration, which 
 
 The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt, and the first line has to stay the bare slash command — and a caller that overrides `prompt` with that bare command re-introduces the bug for itself.
 
+#### What the run reports about itself
+
+A review costs real money and burns real context, and until [#94](https://github.com/refokus-agency/platform/issues/94) neither number was visible anywhere. `show-full-output` defaults to `false`, so Claude's own output never reaches the run log — but the action still writes the full transcript to disk and exposes its path as the `execution_file` output. The cost and every agent's token usage were already in there; nobody was reading them.
+
+The `Report run telemetry` step does, and posts them as their **own** comment on the pull request:
+
+```markdown
+### Run telemetry
+
+**Cost** $0.8421 · **Turns** 42 · **Duration** 3m 12s
+
+| Agent | Context | Model |
+|---|---|---|
+| **⬥ main** (orchestrator) | **90k** | claude-opus-5 |
+| ↳ code-reviewer | 120k | claude-sonnet-5 |
+| ↳ security-reviewer | 88k | claude-sonnet-5 |
+```
+
+Its own comment, and not part of the review, because the review comment is written by the `code-review` plugin — a marketplace package this repo does not own. Telemetry that had to be threaded through the plugin's output would depend on the plugin's cooperation; a separate comment depends on nothing. Each run posts its own, with no upsert and no edit: how the spend moves across runs is worth more than a tidy thread.
+
+Three decisions inside it are worth knowing before you change anything:
+
+**Context is the agent's last message, never a sum across its messages.** Every assistant message reports the window that agent was holding at that turn, and the figure only grows — so the final message already *is* the maximum. Adding them up inflates it by roughly 25x. Measured on real transcripts: a main agent that went `71k → 90k` sums to `2,241k`, and a subagent that went `66k → 120k` sums to `3,230k`. The figure this reports is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` on the agent's last assistant message, matching how Claude Code's own `/context` counts. Do not reach for `task_notification.usage.total_tokens` instead — it is cumulative across turns, which is the inflated number wearing a convenient name.
+
+**There is no verdict.** The comment reports the raw count and stops. No threshold, no 200k comparison, no colour, no pass or fail. Whoever reads it makes that call against whatever yardstick they care about, and a workflow that made it for them would be wrong the first time the yardstick moved.
+
+**The script cannot fail the job, by two independent mechanisms.** `report-run-telemetry.sh` returns `0` on every path — missing file, empty file, malformed JSON, missing field, a failing `gh pr comment` — emitting a `::notice::` instead, and the step carries `continue-on-error: true` on top of that. This is the deliberate divergence from its sibling `review-guard.sh`, which is *allowed* to go red: an unverified review is a result the caller has to see, an unreported cost is not. `@v1` is force-moved onto every consumer repo in the org, so a bug in an advisory reporter must never be able to redden a CI check anywhere.
+
+Per-agent **cost** is absent for a reason: no per-agent USD figure exists anywhere in the transcript. `SDKResultMessage.usage` is main-agent-loop only by its own documentation, and `modelUsage` aggregates per *model* across every agent. A per-agent number would have to be estimated from model rates, and an estimate presented beside three measured figures reads as measured. Aggregate cost and per-agent context are what the transcript actually knows.
+
+Per-agent rows are also all-or-nothing. Agents are separated by `parent_tool_use_id` — `null` is the orchestrator, any value is one Task subagent — and if a future `claude-code-action` stops emitting it, every subagent message becomes indistinguishable from an orchestrator one and the main row would silently absorb the lot. So when the transcript shows `Task` fan-out but itemises no per-agent usage, the whole table is dropped and only the aggregate figures are posted. One plausible wrong number is worse than no number.
+
+Nothing from the transcript body reaches the comment. It is unsanitized tool output on a public repository, so only numbers, model names and subagent type names leave the runner — never prompt text, tool input, tool output or file contents. Same posture as the guard, for the same reason.
+
 Because a reusable workflow runs in the **caller's** context, the API key is always the caller's. An external consumer supplies their own `ANTHROPIC_API_KEY`; this repo's secrets are never in scope, and neither is its Anthropic bill.
 
 Two caller-side requirements the reusable cannot enforce from the inside: `id-token: write` is mandatory (the action exchanges the workflow's GitHub OIDC token for a GitHub App token), and `pull-requests: write` is needed to post the review. See `examples/comment-code-review.yml`.
@@ -334,11 +368,11 @@ An alternative would be to publish the composite action as a standalone GitHub A
 
 ### Why `code-review.yml`'s platform checkout is not like the others
 
-It is the one reusable that does not check out `refokus-agency/platform` into `.platform/` **for the composite `setup` action**. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above. Since [#79](https://github.com/refokus-agency/platform/issues/79) it does take a secondary checkout — for the guard script, and for nothing else.
+It is the one reusable that does not check out `refokus-agency/platform` into `.platform/` **for the composite `setup` action**. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above. Since [#79](https://github.com/refokus-agency/platform/issues/79) it does take a secondary checkout — for the post-run scripts in `.github/scripts`, and for nothing else. There are two of them now: the guard from [#79](https://github.com/refokus-agency/platform/issues/79) and the telemetry reporter from [#94](https://github.com/refokus-agency/platform/issues/94).
 
 In the other reusables that checkout exists for exactly one reason: reaching the local composite `setup` action. `code-review.yml` never calls `setup` — `claude-code-action` ships its own runtime and installs what it needs. Worse, calling `setup` here would hard-fail: it detects the package manager from a lockfile, and `platform` has no `package.json` at all, so it would exit with `::error::No lockfile found`.
 
-A checkout with no consumer is just latency and one more moving part — which held exactly until the guard step gave it one. So the checkout it does take is kept as narrow as the need: sparse (`.github/scripts` only), and placed *after* the review rather than before it, so platform's files are not sitting in the workspace while the review reads an untrusted pull request head. `setup` is still never called here, which is the half of this that was always load-bearing.
+A checkout with no consumer is just latency and one more moving part — which held exactly until the guard step gave it one. So the checkout it does take is kept as narrow as the need: sparse (`.github/scripts` only), and placed *after* the review rather than before it, so platform's files are not sitting in the workspace while the review reads an untrusted pull request head. It is sparse on the whole directory rather than on one file, which is why [#94](https://github.com/refokus-agency/platform/issues/94) added a second consumer without adding a second checkout. `setup` is still never called here, which is the half of this that was always load-bearing.
 
 ### Why is `platform` public?
 
