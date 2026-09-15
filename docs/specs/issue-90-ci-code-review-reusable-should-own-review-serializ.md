@@ -231,8 +231,10 @@ genuine review requests on the same pull request, and the newer one produces the
   holds. → Mitigated by a verified actionlint pass and by the live test exercising the real case.
 - **The timeout cannot be tested.** → Accepted by decision. If it misfires the symptom is a job
   dying at 30 minutes — visible, and reversible by a caller-supplied input.
-- **Consumers that do not bump stay broken.** → Issues in the four affected repos, with explicit
-  ordering: bump the pin first, remove the block second.
+- **Consumers that do not bump stay broken.** → Issues in the affected repos, with explicit
+  ordering: remove the caller-side block first, bump the pin second. Bumping alone leaves the
+  caller group stacked on top of the new job-level one and reintroduces this exact bug; removing
+  alone merely drops serialization until the pin moves — wasteful, but nothing is lost.
 - **The live test mutates an external repo (`navigation`).** → Step 6 includes reverting the pin as
   part of its done criterion.
 - **Consumers that do bump see a behaviour change:** reviews that previously ran in parallel now
@@ -262,8 +264,12 @@ it anyway** — precisely the gating mechanism `code-review.yml` depends on.
 
 ## Follow-up (post-merge, outside this PR)
 
-Open an issue in each consumer repo that still carries the caller-side block, asking it to bump the
-pin to the new release **first** and then remove the `concurrency:` block:
+Open an issue in each consumer repo that still carries the caller-side block. Doing both changes in
+one PR is the only sequence with no bad interim state; if they must be split, remove the
+`concurrency:` block **first** and bump the pin **second**. A caller that bumps while still carrying
+its own block keeps killing queued reviews — the original bug, in full. A caller that removes the
+block while still on the old pin simply runs reviews unserialized, which costs a little and breaks
+nothing.
 
 | Repo | Pin | Caller `concurrency:` |
 |---|---|---|
@@ -271,4 +277,3 @@ pin to the new release **first** and then remove the `concurrency:` block:
 | `refokus-agency/navigation` | v1.10.2 | yes |
 | `refokus-agency/optik-ai-custom-code` | v1.10.3 | yes |
 | `refokus-agency/time-to-refokus-ai-v2` | v1.10.3 | yes (own group name, file is `pr-code-review.yml`) |
-| `beogip/kael.code` | v1 | yes (floating `@v1`, so it receives the reusable fix automatically) |
