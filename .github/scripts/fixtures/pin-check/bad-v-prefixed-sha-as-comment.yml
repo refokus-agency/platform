@@ -1,0 +1,8 @@
+# The same defect with a `v` glued on. The API rejects it, but only the API did: before
+# the leading `v` was stripped this passed under --no-api. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v3d3c42e

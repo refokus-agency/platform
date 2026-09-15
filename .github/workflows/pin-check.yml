@@ -1,0 +1,48 @@
+name: Pin check
+
+# Every third-party action under .github/ must be pinned to a full-length commit SHA
+# with a trailing version comment. This gate enforces that on every pull request, so a
+# floating tag can never reach main — where it would propagate to every consumer repo
+# through the force-moved @v1 tag.
+#
+# This gate runs our own script rather than an off-the-shelf action, deliberately. A
+# gate whose job is to limit how much third-party code runs in our CI should not itself
+# be third-party code — see docs/architecture.md.
+#
+# Rationale: docs/architecture.md -> "Why are third-party actions pinned by SHA?"
+# How to fix a red run: docs/contributing.md -> "Pinning third-party actions"
+
+on:
+  pull_request:
+
+# Read-only, by design. This gate needs no secrets and must never be able to write to
+# the repository: pull_request runs for forks too, and a security gate that can commit
+# is a bigger hole than the one it closes.
+permissions:
+  contents: read
+
+jobs:
+  pinned:
+    name: Third-party actions are SHA-pinned
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here talks to git over the network. Don't leave a token in .git/config.
+          persist-credentials: false
+
+      # Runs before the real check: if the gate itself is broken, a green run on the
+      # repo means nothing. A gate that has never failed is not a gate.
+      - name: Self-test the gate
+        run: ./.github/scripts/check-action-pins.sh --self-test
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # yq and gh are both preinstalled on ubuntu-latest; the script needs nothing else.
+      # The token is not for write access — it keeps the tag lookups off the anonymous
+      # rate limit, which a busy fork PR would otherwise hit.
+      - name: Check every third-party action is SHA-pinned
+        run: ./.github/scripts/check-action-pins.sh
+        env:
+          GH_TOKEN: ${{ github.token }}

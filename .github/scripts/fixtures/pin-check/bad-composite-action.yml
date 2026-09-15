@@ -1,0 +1,7 @@
+# Composite-action shape (.runs.steps), not workflow shape. Expected findings: 1.
+name: Fixture composite action
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      shell: bash
