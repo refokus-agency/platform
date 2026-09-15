@@ -5,7 +5,7 @@ name: Pin check
 # floating tag can never reach main — where it would propagate to every consumer repo
 # through the force-moved @v1 tag.
 #
-# This gate runs our own script rather than an off-the-shelf action, deliberately. A
+# Both jobs run our own scripts rather than an off-the-shelf action, deliberately. A
 # gate whose job is to limit how much third-party code runs in our CI should not itself
 # be third-party code — see docs/architecture.md.
 #
@@ -46,3 +46,20 @@ jobs:
         run: ./.github/scripts/check-action-pins.sh
         env:
           GH_TOKEN: ${{ github.token }}
+
+  dependabot-coverage:
+    name: Composite actions have Dependabot coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A pin that is never bumped still passes the job above — it is a pin, just a
+      # stale one. Dependabot is what keeps pins fresh, and it does not reach
+      # .github/actions/** without an explicit entry, so a new composite action would
+      # silently stop receiving security updates with nothing going red.
+      # yq is preinstalled on ubuntu-latest; the script needs no other dependency.
+      - name: Check every composite action is declared in dependabot.yml
+        run: ./.github/scripts/check-dependabot-coverage.sh
