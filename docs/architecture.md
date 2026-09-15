@@ -366,6 +366,34 @@ Repos that do need scripts can opt out with `unsafe-install-scripts: true`. The 
 
 This default is especially important in the Dependabot flow (see `docs/dependabot.md`): Dependabot PRs can trigger CI automatically (with `GITHUB_TOKEN` available), so a compromised dep would otherwise have a window to run install-time code with token access. `--ignore-scripts` closes that window.
 
+### Why are third-party actions pinned by SHA?
+
+A Git tag is a mutable pointer. `uses: actions/checkout@v7` does not name code — it names a label that the action's owner, or anyone who compromises their account, can repoint at any commit at any time, with no PR and no notification to you. That is not hypothetical: in March 2025, `tj-actions/changed-files` had every one of its tags retargeted at a commit that dumped runner memory — including CI secrets — into publicly readable build logs, across roughly 23,000 repositories ([CVE-2025-30066](https://nvd.nist.gov/vuln/detail/CVE-2025-30066)).
+
+This repo is a force multiplier for that failure. Consumers pin `refokus-agency/platform/...@v1`, and `v1` is force-moved to every release on the v1.x line (see [Versioning with release-please](#versioning-with-release-please)). A retargeted upstream tag reaches every Refokus project on the next run — no merge, no review, no version bump. The blast radius of a third-party action here is the whole org.
+
+So every third-party `uses:` under `.github/workflows/` and `.github/actions/` names an immutable commit SHA, with the human-readable version carried in a trailing comment:
+
+```yaml
+uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+```
+
+Three pieces make the convention hold rather than rot:
+
+- **[pinact](https://github.com/suzuki-shunsuke/pinact) generates the pins, locally.** A hand-typed SHA is a hand-typed mistake, and here a wrong pin breaks CI/CD everywhere at once. `.pinact.yaml` scopes the tool to `.github/`. It runs on a developer's machine, not in CI — see below.
+- **The `Pin check` workflow gates every PR** with [`.github/scripts/check-action-pins.sh`](../.github/scripts/check-action-pins.sh). It rejects a ref that isn't a full-length SHA, a pin with no version comment, and — the half that is easy to lose — a version comment that disagrees with the commit it labels, so a pin can't be made to *look* like `v7.0.1` while pointing somewhere else. Verification fails **closed**: if the GitHub API can't be reached, the check fails rather than passing something unverified. The gate runs read-only (`contents: read`) with no secrets — a security gate that can write to the repo is a bigger hole than the one it closes.
+- **Dependabot owns the bumps,** so pinning trades "silently current" for "explicitly current" rather than for "stale". Composite actions need their own `dependabot.yml` entry — see [dependabot.md](dependabot.md#action-pins-in-this-repo).
+
+**Why the gate is our own script and not an action.** There is a ready-made action that wraps pinact, and the first version of this gate used it. It worked. We replaced it anyway, because the shape was wrong: enforcing a policy about not trusting third-party code, by running third-party code. Pinning that wrapper to a SHA stops its tag from moving; it does not stop the code at that SHA from executing in the job. So the gate is ~200 lines of bash we own, depending only on `yq` and `gh`, both preinstalled on the runner.
+
+pinact itself is not the problem and did not go away — it is still how pins are *generated*, on a developer's machine, where a compromise reaches a working tree under review rather than CI. And because the script resolves every tag itself, a pinact that wrote a bad SHA with a plausible-looking comment would be caught by the gate. Asking a tool to verify its own output is not verification.
+
+The trade-off is that we maintain the check. That cost is bounded — the same trade this repo already took with [`check-dependabot-coverage.sh`](../.github/scripts/check-dependabot-coverage.sh) — and it buys a CI surface with no third-party code in it at all. The script carries a `--self-test` mode, run as its own CI step ahead of the real check, because a gate that has never been shown to fail is not a gate.
+
+**First-party `@v1` references in `examples/` stay floating, deliberately.** A consumer copies those caller files once and must keep receiving fixes without editing them; that is the entire point of the floating major tag, and we control the repo it points at. The threat model here is *someone else's* mutable tag, not our own. (Whether first-party callers should pin too is a separate question with a separate trade-off — [#60](https://github.com/refokus-agency/platform/issues/60).)
+
+This is a complement to an org-level allowed-actions policy, not a substitute: a policy decides *which* actions may run, a pin decides *which code* those actions are.
+
 ### Why does each reusable re-checkout the `platform` repo?
 
 The composite action (`setup`) lives in `platform`. When a reusable runs, the working directory is a checkout of the **caller's** repo — not platform. To use a local composite action path like `./.github/actions/setup`, the reusable needs platform checked out somewhere accessible.

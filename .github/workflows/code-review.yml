@@ -459,7 +459,7 @@ jobs:
 
       - name: Checkout pull request head
         if: steps.pr.outputs.eligible == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Same-repo head only — see the fork gate in "Resolve pull request".
           ref: ${{ steps.pr.outputs.head-sha }}
@@ -479,8 +479,10 @@ jobs:
         id: review
         if: steps.pr.outputs.eligible == 'true'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
-        # be exposed as a workflow input. Bump it here when upstream cuts a new major.
-        uses: anthropics/claude-code-action@v1
+        # be exposed as a workflow input. Do not hand-edit the SHA — Dependabot's weekly
+        # github-actions run bumps it and its version comment together, and the pin-check
+        # gate rejects a comment that does not match its SHA.
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1.0.223
         with:
           prompt: ${{ inputs.prompt }}
           plugins: ${{ inputs.plugins }}
@@ -510,7 +512,7 @@ jobs:
         # limit — but it means the credential has to be kept off disk explicitly.
         if: always() && steps.pr.outputs.eligible == 'true'
         id: guard-checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}

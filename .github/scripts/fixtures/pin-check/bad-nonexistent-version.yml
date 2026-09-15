@@ -1,0 +1,9 @@
+# The comment names a release that does not exist. GitHub answers 422 here, not 404 —
+# a verdict, not an outage, so the gate must say "the comment is wrong" rather than
+# "could not reach the API", and must not retry. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v999.0.0

@@ -122,19 +122,19 @@ jobs:
       - name: Mint release token (GitHub App)
         id: app-token
         if: env.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout caller repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout platform repo (for composite actions)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
@@ -173,7 +173,7 @@ jobs:
 
       - name: Semantic release (GitHub Packages)
         if: inputs.registry == 'github-packages'
-        uses: cycjimmy/semantic-release-action@v6
+        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
           ci: true
           semantic_version: ${{ inputs.semantic-release-version }}
@@ -188,7 +188,7 @@ jobs:
       # tagging and the @semantic-release/git push.
       - name: Semantic release (public npm via OIDC)
         if: inputs.registry == 'npm'
-        uses: cycjimmy/semantic-release-action@v6
+        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
           ci: true
           semantic_version: ${{ inputs.semantic-release-version }}

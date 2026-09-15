@@ -159,6 +159,52 @@ Secrets are a touchier change because repos may not have the secret configured a
 - If the reusable marks the secret as `required: true`, every caller must have it. Repos that don't will fail.
 - Prefer making new secrets optional (`required: false`) and having the reusable behave gracefully when they're missing.
 
+## Pinning third-party actions
+
+**Every third-party `uses:` under `.github/` must reference a full-length commit SHA with a trailing version comment.** Never a tag, never a branch.
+
+```yaml
+# Right
+uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+# Wrong — a tag is mutable, and whoever can move it runs code in every consumer repo
+uses: actions/checkout@v7
+```
+
+This applies to `.github/workflows/**` and `.github/actions/**`. It does **not** apply to first-party `refokus-agency/platform/...@v1` references in `examples/` (those are deliberately floating — see [architecture.md](architecture.md#why-are-third-party-actions-pinned-by-sha)) or to local `./` references.
+
+Don't type SHAs by hand. Generate them:
+
+```sh
+brew install suzuki-shunsuke/pinact/pinact
+pinact run
+```
+
+`pinact run` rewrites every unpinned ref in place and writes the matching version comment. `.pinact.yaml` at the repo root scopes it to `.github/`, so it will not touch `examples/`.
+
+pinact is a **local** tool here. CI does not run it — the gate is our own script, so that no third-party code runs in the workflow whose job is to limit third-party code. See [architecture.md](architecture.md#why-are-third-party-actions-pinned-by-sha).
+
+Check your work the same way CI will:
+
+```sh
+./.github/scripts/check-action-pins.sh            # full check, hits the GitHub API
+./.github/scripts/check-action-pins.sh --no-api   # offline: shape and comment only
+```
+
+The `Pin check` workflow runs that script on every pull request. It fails if a ref is unpinned, if a pin has no version comment, or if a version comment disagrees with the commit it labels. To fix a red run, run `pinact run` and commit the result.
+
+If you change the script itself, `./.github/scripts/check-action-pins.sh --self-test` runs it against [`.github/scripts/fixtures/pin-check/`](../.github/scripts/fixtures/pin-check) and asserts it still rejects what it is supposed to reject. CI runs it too, before the real check.
+
+**Bumps are Dependabot's job, not yours.** Dependabot updates the SHA and its version comment together, weekly, so its PRs pass the gate unmodified.
+
+One thing Dependabot can't do for you: it does not look inside `.github/actions/`. If you add a composite action there, it needs its own entry in `.github/dependabot.yml` or its pins freeze forever. You don't have to remember this — the `Composite actions have Dependabot coverage` job fails the PR and prints the block to paste. To check before pushing:
+
+```sh
+./.github/scripts/check-dependabot-coverage.sh
+```
+
+Background: [dependabot.md](dependabot.md#action-pins-in-this-repo).
+
 ## Deprecating something
 
 1. Add a warning in the reusable when the deprecated path is used:

@@ -87,6 +87,38 @@ Two gates that used to matter here are now mostly historical:
 - **The credential gate.** `Resolve auth` still skips green when no Anthropic credential resolves, but Dependabot no longer reaches it. Under the old `pull_request` trigger this was the whole mechanism: Dependabot can't read `ANTHROPIC_API_KEY`, so its PRs skipped there.
 - **`allowed-bots`.** Its subject moved. It used to gate who *opened* the pull request; it now gates who *posted the comment*, so it has nothing to say about a Dependabot PR you review by hand. Leaving it empty is also the loop guard — see [architecture.md](architecture.md#four-gates-all-skipping-green).
 
+## Action pins in this repo
+
+Everything above is about Dependabot running *in a consumer repo*. This section is about Dependabot running *here*, keeping this repo's own SHA-pinned actions current — the other half of [why we pin at all](architecture.md#why-are-third-party-actions-pinned-by-sha).
+
+`.github/dependabot.yml` declares **two** `github-actions` entries, not one:
+
+```yaml
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"                          # .github/workflows/**
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/setup"     # the composite action
+```
+
+The second one is not redundant. **Dependabot's `github-actions` ecosystem does not recurse into `.github/actions/**`.** The `/` entry covers `.github/workflows/` and stops there; it will never see `.github/actions/setup/action.yml`. Without an explicit entry pointing at that directory, its four pins (`pnpm/action-setup`, `oven-sh/setup-bun`, and two `actions/setup-node`) would be frozen at whatever SHA they were pinned to and silently stop receiving security updates — the exact failure mode pinning is supposed to prevent, just slower.
+
+**Dependabot cannot be made to find it on its own.** There is no glob or recursive directory option for this ecosystem, and the upstream request ([dependabot-core#7495](https://github.com/dependabot/dependabot-core/issues/7495)) is closed as not planned. So the entry is a manual duty:
+
+> **Adding a composite action under `.github/actions/<name>/`? Add a matching `directory: "/.github/actions/<name>"` entry to `.github/dependabot.yml` in the same PR.**
+
+But *forgetting* it is not left to memory. The `Composite actions have Dependabot coverage` job in `pin-check.yml` runs [`.github/scripts/check-dependabot-coverage.sh`](../.github/scripts/check-dependabot-coverage.sh) on every PR: it lists every directory under `.github/actions/` holding an `action.yml`/`action.yaml` — at any depth, so a grouped layout like `.github/actions/vercel/deploy/` counts too — and fails if any of them has no `github-actions` entry pointing at it. The failure prints the exact block to paste.
+
+That distinction is the whole point. What can't be automated is Dependabot *recursing*; detecting the *missing entry* is five lines of `yq`. Without the check the failure mode is silent by construction — the pin-check job only verifies that pins **are** pins, not that they are **fresh**, so a frozen pin passes it forever, and the only other signal is the *absence* of Dependabot PRs for that directory. An absence is not something a reviewer notices.
+
+The script reads both spellings of the option (`directory:` and `directories:`), normalizes trailing slashes, and ignores entries from other ecosystems. Run it locally the same way CI does:
+
+```sh
+./.github/scripts/check-dependabot-coverage.sh
+```
+
+Dependabot updates the SHA and its trailing version comment together, so its PRs pass the `Pin check` gate unmodified.
+
 ## Defensive layers
 
 What's in place to limit blast radius if a dependency is compromised:
