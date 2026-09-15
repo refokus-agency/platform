@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.11.0](https://github.com/refokus-agency/platform/compare/v1.10.3...v1.11.0) (2026-09-15)
+
+
+### Features
+
+* report agent run telemetry in code-review comment ([#94](https://github.com/refokus-agency/platform/issues/94)) ([#95](https://github.com/refokus-agency/platform/issues/95)) ([3b0dde0](https://github.com/refokus-agency/platform/commit/3b0dde0084d9d88b9d8f95d324b71d299a81e888))
+
+
+### Bug Fixes
+
+* **code-review:** reusable owns review serialization ([#97](https://github.com/refokus-agency/platform/issues/97)) ([df02d4f](https://github.com/refokus-agency/platform/commit/df02d4ffdf6a6a7325ba748c409d722b5af921ab))
+
 ## [1.10.3](https://github.com/refokus-agency/platform/compare/v1.10.2...v1.10.3) (2026-09-14)
 
 
