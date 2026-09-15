@@ -131,6 +131,15 @@ extract_refs() {
   ' "$1"
 }
 
+# Read one key out of the cache. The match must be on the *whole* first field: a
+# substring match (grep -F, even with the tab) also matches a key it is a suffix of, so
+# a ref for an attacker-owned `xactions/checkout` cached earlier in the run would answer
+# the lookup for `actions/checkout` — handing step 3 a SHA it never asked GitHub about,
+# which is exactly the lying-comment case the gate exists to catch.
+cache_lookup() {
+  awk -F'\t' -v k="$1" '$1 == k { print $2; exit }' "$CACHE_FILE" 2>/dev/null || true
+}
+
 # Resolve a version to the commit it points at. One call handles both lightweight and
 # annotated tags, because the commits endpoint dereferences the tag object for us.
 # (Do not reach for `git ls-remote` instead: it returns the tag *object* for an annotated
@@ -145,7 +154,7 @@ resolve_version() {
   local repo="$1" version="$2" key cached sha output status
   key="${repo}@${version}"
 
-  cached="$(grep -F -m1 "${key}"$'\t' "$CACHE_FILE" 2>/dev/null | cut -f2- || true)"
+  cached="$(cache_lookup "$key")"
   if [[ -n "$cached" ]]; then
     printf '%s' "$cached"
     return 0
@@ -276,6 +285,35 @@ scan_targets() {
   return 0
 }
 
+# The cache is the one place where a lookup can answer step 3 without the API, so a
+# wrong answer here is invisible: the run stays green and never makes the call it
+# skipped. Exercised offline, so it guards the suffix-collision regression on every run.
+self_test_cache_lookup() {
+  local failures=0 got
+
+  printf 'xactions/checkout@v7.0.1\tDECOYSHA\n' >"$CACHE_FILE"
+  printf 'actions/setup-node@v4\tREALSHA\n' >>"$CACHE_FILE"
+
+  got="$(cache_lookup 'actions/checkout@v7.0.1')"
+  if [[ -n "$got" ]]; then
+    echo "  FAIL cache lookup: 'actions/checkout@v7.0.1' matched an unrelated key (got '${got}')."
+    failures=$((failures + 1))
+  else
+    echo "  PASS cache lookup rejects a suffix-colliding key"
+  fi
+
+  got="$(cache_lookup 'actions/setup-node@v4')"
+  if [[ "$got" == "REALSHA" ]]; then
+    echo "  PASS cache lookup returns an exact key"
+  else
+    echo "  FAIL cache lookup: exact key returned '${got}', expected 'REALSHA'."
+    failures=$((failures + 1))
+  fi
+
+  : >"$CACHE_FILE"
+  return $failures
+}
+
 run_self_test() {
   local file name expected actual failures=0 skipped=0
 
@@ -318,6 +356,10 @@ run_self_test() {
       failures=$((failures + 1))
     fi
   done
+
+  local cache_failures=0
+  self_test_cache_lookup || cache_failures=$?
+  failures=$((failures + cache_failures))
 
   if [[ $failures -gt 0 ]]; then
     echo
