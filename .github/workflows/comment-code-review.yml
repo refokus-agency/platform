@@ -18,10 +18,12 @@ permissions:
   # Mandatory — see the comment in examples/comment-code-review.yml.
   id-token: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  # false — see examples/comment-code-review.yml.
-  cancel-in-progress: false
+# No `concurrency:` here on purpose — the same rule every caller follows. Serialization is owned
+# by the reusable, the only place that knows the trigger phrase. A block here would apply ON TOP
+# OF the reusable's job-level group, take in every comment in the repo rather than just review
+# requests, and silently kill queued reviews. See
+# docs/architecture.md#why-serialization-lives-in-the-reusable-not-the-caller and the longer
+# comment in examples/comment-code-review.yml.
 
 jobs:
   code-review:

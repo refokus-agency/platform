@@ -111,13 +111,33 @@ Once gate 3 passes, the first thing that happens is an acknowledgement. A commen
 
 `issue_comment` carries no ref: the payload describes the comment and the issue, never a commit. `actions/checkout` with no `ref:` would therefore check out the caller's **default branch**, and the failure would be silent rather than loud — the review gets its diff from `gh pr diff` over the API, so it would still produce plausible findings while the subagents validating each one against the source read the wrong tree. So `Resolve pull request` fetches `.head.sha` from the API and the checkout pins it.
 
-#### Why the caller sets `cancel-in-progress: false`
+#### Why serialization lives in the reusable, not the caller
 
-The example caller keys its concurrency group on `github.event.issue.number` — on `issue_comment` the payload has no `pull_request` object, so the usual `github.event.pull_request.number` is empty and would collapse every pull request into one group. The interesting half is the cancel flag.
+`code-review.yml` declares `concurrency` on its own `review:` job, and the example caller declares none. That split is not stylistic — a caller physically cannot get this right.
 
-`concurrency` is a property of the **run**, evaluated when GitHub creates it, while the trigger phrase is checked in the reusable's **job-level `if:`**. So every comment on the pull request creates a run that joins the group, whether or not it contains the phrase. Under `cancel-in-progress: true` an ordinary "thanks, fixing that now" posted while a review is in flight cancels the review — a normal-use failure, not just a griefing vector.
+Workflow-level `concurrency` is a property of the **run**, evaluated when GitHub creates it, and it has no access to the reusable's `inputs`. A caller therefore does not know the trigger phrase and cannot key its group on "is this a review request". Every comment on the pull request — `@claude review` or "thanks, fixing that now" — creates a run that joins the same group. `cancel-in-progress: false` looks like the fix and is not: it protects a run that is already **in progress**, while GitHub cancels a **pending** run in a group unconditionally. So a genuine queued review died the moment any unrelated comment landed, with no signal anywhere that it had.
 
-`false` also matches the trigger's semantics. `true` earned its place under `synchronize`, where a new push genuinely obsoleted the review of the previous head. A comment-triggered run is a request someone made on purpose, and a second `@claude review` is a second request rather than a replacement for the first.
+Inside the reusable, `inputs.trigger-phrase` is in scope, so the group key can distinguish the two cases:
+
+```yaml
+group: >-
+  code-review-${{ github.repository }}-${{ github.event.issue.number }}-${{
+  inputs.trigger-phrase != '' && contains(github.event.comment.body, inputs.trigger-phrase)
+  && 'request' || github.event.comment.id }}
+cancel-in-progress: false
+```
+
+Comments carrying the phrase collapse onto the shared `-request` key and queue behind each other. Comments without it fall to `github.event.comment.id`, which is unique per comment — so each one sits alone in its own group and contends with nothing.
+
+**The key is deliberately order-agnostic.** Whether GitHub evaluates a job's `if:` before or after it joins the job's concurrency group is undocumented. Giving non-matching comments a unique key makes the outcome the same either way: if the `if:` runs first the job skips, and if the group is joined first the group has exactly one member. The behaviour no longer depends on knowing which it is.
+
+`cancel-in-progress` stays `false` for the same reason it always did. `true` earned its place under `synchronize`, where a new push genuinely obsoleted the review of the previous head; a comment-triggered run is a request someone made on purpose, and a second `@claude review` is a second request rather than a replacement for the first.
+
+**Silent cancellation of a pending run is now acceptable**, where before it was the bug. With the group correctly scoped, the only way to displace a pending run is a *third* genuine review request on the same pull request while one is running and one is queued — and all three are requests for a review of the same pull request, so the newest run produces it. Nothing concrete is lost. The signal cannot be emitted anyway: a pending run never dispatches a job, so no step executes, not even `if: always()`, and the run that displaces it has no context or API field distinguishing a concurrency cancel from a manual one.
+
+Because the group can now hold a queue, the job also carries `timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}` (default 30, against GitHub's own default of 360). Before serialization a hung review inconvenienced only itself; now it would block everything behind it for six hours. Callers may raise the input.
+
+**Callers must not add their own `concurrency` block.** A caller-level group applies *on top of* the job-level one and reintroduces exactly the bug described above.
 
 #### How the review models are chosen
 

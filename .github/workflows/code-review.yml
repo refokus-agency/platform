@@ -187,6 +187,21 @@ on:
         required: false
         type: string
         default: '1'
+      timeout-minutes:
+        description: |
+          Ceiling, in minutes, on the review job. GitHub's own default is 360 — six hours.
+
+          It exists because of the concurrency group on the same job. Reviews for a pull request
+          now queue behind each other, so a review that hangs stops being a self-contained
+          annoyance and becomes a blocker for every request behind it. The cap kills the job and
+          releases the group.
+
+          Raise it if your reviews are legitimately long. Hitting it terminates the job outright —
+          there is no graceful finish and no review comment, so pick a value you would rather see
+          than a run that never ends.
+        required: false
+        type: number
+        default: 30
       allowed-bots:
         description: |
           Comma-separated list of bot actors whose review requests should be honoured, or '*' for
@@ -249,6 +264,34 @@ jobs:
       inputs.trigger-phrase != '' &&
       contains(github.event.comment.body, inputs.trigger-phrase)
     runs-on: ubuntu-latest
+    # Serialization is owned here, not by the caller. A caller-side `concurrency` cannot read
+    # this workflow's `inputs`, so its group takes in EVERY issue_comment in the repo — and
+    # GitHub cancels a PENDING run in a group unconditionally, `cancel-in-progress: false` or
+    # not. That killed genuine queued reviews. See
+    # docs/architecture.md#why-serialization-lives-in-the-reusable-not-the-caller.
+    concurrency:
+      # Comments carrying the phrase collapse onto the shared '-request' key and queue behind
+      # each other. A comment without it falls to its own `comment.id` and is therefore alone in
+      # its group, contending with nothing. That makes behaviour identical whether the job `if:`
+      # is evaluated before or after the group is joined — the ordering is undocumented, and
+      # this removes the need to know it.
+      group: >-
+        code-review-${{ github.repository }}-${{ github.event.issue.number }}-${{
+        inputs.trigger-phrase != '' && contains(github.event.comment.body, inputs.trigger-phrase)
+        && 'request' || github.event.comment.id }}
+      # false, not true: a second `@claude review` is a second request, not a replacement for
+      # the first. `true` belongs to `synchronize`, where a new push obsoletes the old review.
+      cancel-in-progress: false
+    # Bounded because the group above can now hold a queue. Before it, a hung review
+    # inconvenienced only itself; now it would hold every queued review for GitHub's
+    # 360-minute default. Caller-overridable via the `timeout-minutes` input.
+    #
+    # `fromJSON` is mandatory, not decoration. A `type: number` input interpolates through
+    # `${{ }}` as a JSON token, and `timeout-minutes` parses a raw integer — bare
+    # `${{ inputs.timeout-minutes }}` fails workflow validation with "Unexpected value",
+    # killing the job before a single step runs. actionlint does not catch it; it is an
+    # evaluation-time error, not a schema violation. See actions/runner#1555.
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
     # grant it or the run fails at startup. Callers need `contents: read`,
