@@ -1,5 +1,9 @@
 # CI + Vercel preview deploy on pull requests.
 # Copy to .github/workflows/pr-preview.yml in your repo.
+#
+# Every `secrets: inherit` below — there is one per job — assumes your repo is in the
+# refokus-agency org. Calling from another organization? Swap each one for an explicit
+# secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
 
 name: Pull Request
 

@@ -280,9 +280,11 @@ secrets:
   # ... etc
 ```
 
-would be noisy and easy to miss when adding a new secret. `secrets: inherit` forwards everything the caller has access to, so adding a new required secret is a one-line change in the reusable.
+would be noisy and easy to miss when adding a new secret. `secrets: inherit` forwards everything the caller has access to, so adding a new secret is a one-line change in the reusable.
 
-The reusable declares which secrets are `required: true`, so a missing one fails with a clear error.
+**This is the default for callers inside `refokus-agency`**, where the caller and the reusables share maintainers. An external caller gets the same blanket forward — every secret it holds, declared or not — against a floating `@v1` tag it doesn't control, which is a materially different trade. Those callers should enumerate instead: see [secrets.md](secrets.md#calling-from-outside-refokus-agency).
+
+Note that every declared secret is `required: false`. A secret declared as required fails the run at startup for every caller that hasn't configured it, so the reusables gate the steps that need a secret instead of demanding it up front.
 
 ### Versioning with release-please
 

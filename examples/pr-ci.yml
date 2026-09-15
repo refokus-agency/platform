@@ -1,5 +1,9 @@
 # CI on pull requests — lint + typecheck + test + build, no deploy.
 # Copy to .github/workflows/pr-ci.yml in your repo.
+#
+# Every `secrets: inherit` below — there is one per job — assumes your repo is in the
+# refokus-agency org. Calling from another organization? Swap each one for an explicit
+# secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
 
 name: Pull Request
 
