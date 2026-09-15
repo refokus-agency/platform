@@ -35,7 +35,97 @@ The caller has access to:
 - **Repository secrets** defined in the repo itself.
 - **Environment secrets** if the job targets a specific environment.
 
-`secrets: inherit` forwards all three to the reusable. The reusable declares which ones it actually requires; anything else is ignored. `GITHUB_TOKEN` is special — it's automatically available without needing to be passed.
+`secrets: inherit` forwards all three to the reusable. It is a blanket forward, not a filter: the called workflow can reference **any** secret the caller holds, **undeclared** keys included — GitHub's [Reusing workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) documentation describes `inherit` as passing the caller's secrets straight through, and the reusable's own `secrets:` block is not consulted to narrow them. So those blocks document intent, not enforcement. `GITHUB_TOKEN` is special — it's automatically available without needing to be passed.
+
+## Calling from outside `refokus-agency`
+
+The files in [`examples/`](../examples/) ship with `secrets: inherit` because they are written for repos **inside** `refokus-agency`, where the caller and the reusables are maintained by the same team. If your repo lives in another organization, swap `inherit` for an explicit `secrets:` map.
+
+The reason is structural, not a statement about trust:
+
+- **`inherit` is a blanket forward, not a filter** — see the section above. It hands the called workflow every secret the caller can see, undeclared keys included. An explicit map is the only thing that bounds what crosses the organization boundary.
+- **`@v1` is a floating tag**, force-moved on every v1.x release, so the code your secrets reach can change without you changing a line. GitHub documents `inherit` for callers in the same organization or enterprise, where that shared ownership already exists. Outside it, list the keys — and if the moving tag is itself the concern, pin the ref as well: `@main` and `@<sha>` are both supported (see [architecture.md](architecture.md#versioning-with-release-please)). The two bound different things. An explicit map bounds **which secrets** cross the organization boundary; a pinned ref bounds **which code** receives them.
+
+Everything else in the examples stays as it ships: same `uses:` lines, same `permissions:`, same `with:` inputs. The only edit is the `secrets:` block.
+
+### Which keys each reusable declares
+
+Each reusable's `workflow_call` → `secrets:` block is the source of truth. If this table and the workflow disagree, the workflow wins — and a PR that adds a secret to a reusable should update this table in the same PR.
+
+| Reusable | Declared secrets |
+|---|---|
+| `ci.yml` | `CHECKOUT_TOKEN` |
+| `deploy.yml` | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `CHECKOUT_TOKEN` |
+| `release.yml` | `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` |
+| `code-review.yml` | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` |
+
+Two notes on reading that table:
+
+- **`CHECKOUT_TOKEN` appears twice on purpose.** Both `ci.yml` and `deploy.yml` declare it, and an explicit map is per-job — mapping it on the CI job only leaves the deploy job's submodule checkout without it.
+- **`GITHUB_TOKEN` is not in the table and cannot be mapped.** GitHub generates it per run and it is always available to the reusable; the caller controls its scopes through `permissions:`, not through `secrets:`.
+
+### Explicit maps, per reusable
+
+`ci.yml`:
+
+```yaml
+jobs:
+  ci:
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    secrets:
+      # Only needed with `submodules: true` pointing at a different private repo.
+      CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}
+```
+
+`deploy.yml`:
+
+```yaml
+jobs:
+  deploy:
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1
+    with:
+      environment: preview   # or stage | production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}   # only with `submodules: true`
+```
+
+`release.yml`:
+
+```yaml
+jobs:
+  release:
+    uses: refokus-agency/platform/.github/workflows/release.yml@v1
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+```
+
+`code-review.yml` — the one reusable whose caller also needs a `permissions:` block, shown here in full because `id-token: write` is mandatory on every path and the reusable cannot detect its absence from the inside (see [Anthropic credentials for code review](#anthropic-credentials-for-code-review)):
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write     # for the 👀 acknowledgement on the triggering comment
+  id-token: write   # mandatory — the run just fails without it
+
+jobs:
+  code-review:
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Or, instead of the API key:
+      # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+### This is less rigid than it looks
+
+- **Omitting a key is fine.** Every declared secret is `required: false`, so a caller that maps two of four still starts. A `required: true` secret would fail the run at startup for every caller missing it; the reusables gate the steps that need a secret instead. Map what you have.
+- **You can rename.** The left-hand side is the name the reusable declares; the right-hand side is whatever the secret is called in *your* repo. A caller storing its Vercel token as `MY_VERCEL_TOKEN` writes `VERCEL_TOKEN: ${{ secrets.MY_VERCEL_TOKEN }}`.
+- **`code-review.yml` may need no secret at all.** On the workload identity federation path (see [Anthropic credentials for code review](#anthropic-credentials-for-code-review)) the credentials are Actions **variables** — `ANTHROPIC_FEDERATION_RULE_ID` and `ANTHROPIC_ORG_ID` — not secrets, and GitHub resolves `vars` against the caller's own repository and organization. Set those two and the job needs no `secrets:` block whatsoever.
 
 ## Configuring secrets
 
@@ -134,21 +224,7 @@ Three things worth knowing before you enable this:
 
 - **`id-token: write` is mandatory in the caller**, on every path — not just federation. The action exchanges the workflow's GitHub OIDC token for a GitHub App token. The reusable cannot detect the omission from the inside; the run just fails. `examples/comment-code-review.yml` grants it.
 - **The API key belongs to the caller, and so does the bill.** A reusable workflow runs in the caller's context with the caller's secrets, so each repo (and each external consumer) pays for its own reviews. The review fans out several parallel agents per run, and cost scales with how often it runs, not with repo count. That is the whole reason the trigger is a comment and not `pull_request` or `push`: every run is one a human asked for. The `model` and `opus-model` inputs set what those agents run on — the defaults keep the whole fan-out on Sonnet, including the steps the review command asks for Opus by name. See [architecture.md](architecture.md#how-the-review-models-are-chosen).
-- **External consumers should pass secrets explicitly rather than `secrets: inherit`.** `inherit` hands a caller's entire secret set to code in this repo, and `@v1` is a floating tag force-moved on every v1.x release. Inside `refokus-agency` that trust already exists; outside it, prefer:
-
-  ```yaml
-  permissions:
-    contents: read
-    pull-requests: write
-    issues: write     # for the 👀 acknowledgement on the triggering comment
-    id-token: write   # mandatory — see the bullet above
-
-  jobs:
-    code-review:
-      uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
-      secrets:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  ```
+- **External consumers should pass secrets explicitly rather than `secrets: inherit`.** The reasoning, the per-reusable tables and the complete caller shape for this workflow — one key plus the `permissions:` block above — live in [Calling from outside `refokus-agency`](#calling-from-outside-refokus-agency). That section is the single copy; this bullet deliberately does not repeat it.
 
 ## Creating the Vercel secrets
 

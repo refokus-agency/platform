@@ -111,13 +111,33 @@ Once gate 3 passes, the first thing that happens is an acknowledgement. A commen
 
 `issue_comment` carries no ref: the payload describes the comment and the issue, never a commit. `actions/checkout` with no `ref:` would therefore check out the caller's **default branch**, and the failure would be silent rather than loud — the review gets its diff from `gh pr diff` over the API, so it would still produce plausible findings while the subagents validating each one against the source read the wrong tree. So `Resolve pull request` fetches `.head.sha` from the API and the checkout pins it.
 
-#### Why the caller sets `cancel-in-progress: false`
+#### Why serialization lives in the reusable, not the caller
 
-The example caller keys its concurrency group on `github.event.issue.number` — on `issue_comment` the payload has no `pull_request` object, so the usual `github.event.pull_request.number` is empty and would collapse every pull request into one group. The interesting half is the cancel flag.
+`code-review.yml` declares `concurrency` on its own `review:` job, and the example caller declares none. That split is not stylistic — a caller physically cannot get this right.
 
-`concurrency` is a property of the **run**, evaluated when GitHub creates it, while the trigger phrase is checked in the reusable's **job-level `if:`**. So every comment on the pull request creates a run that joins the group, whether or not it contains the phrase. Under `cancel-in-progress: true` an ordinary "thanks, fixing that now" posted while a review is in flight cancels the review — a normal-use failure, not just a griefing vector.
+Workflow-level `concurrency` is a property of the **run**, evaluated when GitHub creates it, and it has no access to the reusable's `inputs`. A caller therefore does not know the trigger phrase and cannot key its group on "is this a review request". Every comment on the pull request — `@claude review` or "thanks, fixing that now" — creates a run that joins the same group. `cancel-in-progress: false` looks like the fix and is not: it protects a run that is already **in progress**, while GitHub cancels a **pending** run in a group unconditionally. So a genuine queued review died the moment any unrelated comment landed, with no signal anywhere that it had.
 
-`false` also matches the trigger's semantics. `true` earned its place under `synchronize`, where a new push genuinely obsoleted the review of the previous head. A comment-triggered run is a request someone made on purpose, and a second `@claude review` is a second request rather than a replacement for the first.
+Inside the reusable, `inputs.trigger-phrase` is in scope, so the group key can distinguish the two cases:
+
+```yaml
+group: >-
+  code-review-${{ github.repository }}-${{ github.event.issue.number }}-${{
+  inputs.trigger-phrase != '' && contains(github.event.comment.body, inputs.trigger-phrase)
+  && 'request' || github.event.comment.id }}
+cancel-in-progress: false
+```
+
+Comments carrying the phrase collapse onto the shared `-request` key and queue behind each other. Comments without it fall to `github.event.comment.id`, which is unique per comment — so each one sits alone in its own group and contends with nothing.
+
+**The key is deliberately order-agnostic.** Whether GitHub evaluates a job's `if:` before or after it joins the job's concurrency group is undocumented. Giving non-matching comments a unique key makes the outcome the same either way: if the `if:` runs first the job skips, and if the group is joined first the group has exactly one member. The behaviour no longer depends on knowing which it is.
+
+`cancel-in-progress` stays `false` for the same reason it always did. `true` earned its place under `synchronize`, where a new push genuinely obsoleted the review of the previous head; a comment-triggered run is a request someone made on purpose, and a second `@claude review` is a second request rather than a replacement for the first.
+
+**Silent cancellation of a pending run is now acceptable**, where before it was the bug. With the group correctly scoped, the only way to displace a pending run is a *third* genuine review request on the same pull request while one is running and one is queued — and all three are requests for a review of the same pull request, so the newest run produces it. Nothing concrete is lost. The signal cannot be emitted anyway: a pending run never dispatches a job, so no step executes, not even `if: always()`, and the run that displaces it has no context or API field distinguishing a concurrency cancel from a manual one.
+
+Because the group can now hold a queue, the job also carries `timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}` (default 30, against GitHub's own default of 360). Before serialization a hung review inconvenienced only itself; now it would block everything behind it for six hours. Callers may raise the input.
+
+**Callers must not add their own `concurrency` block.** A caller-level group applies *on top of* the job-level one and reintroduces exactly the bug described above.
 
 #### How the review models are chosen
 
@@ -190,6 +210,40 @@ That requirement is an *instruction*, and an instruction only binds a model that
 Whether the race is lost is a matter of pacing rather than configuration, which is what makes it look repo-specific and is why it survived this long. Where the orchestrator happens to stay in-turn long enough, the notifications land and the review completes; small diffs fail the most reliably, because there is nothing left to do after the fan-out and the turn ends immediately. `subagent_stats.requested` in the transcript is how to read it — `unset` is backgrounded by the runtime, and only an explicit `foreground` removes the race. Prompt wording alone is enough to obtain it, which is the only reason this is fixable from this repo at all.
 
 The multiline block scalar is load-bearing — the override has to arrive as part of the same prompt, and the first line has to stay the bare slash command — and a caller that overrides `prompt` with that bare command re-introduces the bug for itself.
+
+#### What the run reports about itself
+
+A review costs real money and burns real context, and until [#94](https://github.com/refokus-agency/platform/issues/94) neither number was visible anywhere. `show-full-output` defaults to `false`, so Claude's own output never reaches the run log — but the action still writes the full transcript to disk and exposes its path as the `execution_file` output. The cost and every agent's token usage were already in there; nobody was reading them.
+
+The `Report run telemetry` step does, and posts them as their **own** comment on the pull request:
+
+```markdown
+### Run telemetry
+
+**Cost** $0.8421 · **Turns** 42 · **Duration** 3m 12s
+
+| Agent | Context | Model |
+|---|---|---|
+| **⬥ main** (orchestrator) | **90k** | claude-opus-5 |
+| ↳ code-reviewer | 120k | claude-sonnet-5 |
+| ↳ security-reviewer | 88k | claude-sonnet-5 |
+```
+
+Its own comment, and not part of the review, because the review comment is written by the `code-review` plugin — a marketplace package this repo does not own. Telemetry that had to be threaded through the plugin's output would depend on the plugin's cooperation; a separate comment depends on nothing. Each run posts its own, with no upsert and no edit: how the spend moves across runs is worth more than a tidy thread.
+
+Three decisions inside it are worth knowing before you change anything:
+
+**Context is the agent's last message, never a sum across its messages.** Every assistant message reports the window that agent was holding at that turn, and the figure only grows — so the final message already *is* the maximum. Adding them up inflates it by roughly 25x. Measured on real transcripts: a main agent that went `71k → 90k` sums to `2,241k`, and a subagent that went `66k → 120k` sums to `3,230k`. The figure this reports is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` on the agent's last assistant message, matching how Claude Code's own `/context` counts. Do not reach for `task_notification.usage.total_tokens` instead — it is cumulative across turns, which is the inflated number wearing a convenient name.
+
+**There is no verdict.** The comment reports the raw count and stops. No threshold, no 200k comparison, no colour, no pass or fail. Whoever reads it makes that call against whatever yardstick they care about, and a workflow that made it for them would be wrong the first time the yardstick moved.
+
+**The script cannot fail the job, by two independent mechanisms.** `report-run-telemetry.sh` returns `0` on every path — missing file, empty file, malformed JSON, missing field, a failing `gh pr comment` — emitting a `::notice::` instead, and the step carries `continue-on-error: true` on top of that. This is the deliberate divergence from its sibling `review-guard.sh`, which is *allowed* to go red: an unverified review is a result the caller has to see, an unreported cost is not. `@v1` is force-moved onto every consumer repo in the org, so a bug in an advisory reporter must never be able to redden a CI check anywhere.
+
+Per-agent **cost** is absent for a reason: no per-agent USD figure exists anywhere in the transcript. `SDKResultMessage.usage` is main-agent-loop only by its own documentation, and `modelUsage` aggregates per *model* across every agent. A per-agent number would have to be estimated from model rates, and an estimate presented beside three measured figures reads as measured. Aggregate cost and per-agent context are what the transcript actually knows.
+
+Per-agent rows are also all-or-nothing. Agents are separated by `parent_tool_use_id` — `null` is the orchestrator, any value is one Task subagent — and if a future `claude-code-action` stops emitting it, every subagent message becomes indistinguishable from an orchestrator one and the main row would silently absorb the lot. So when the transcript shows `Task` fan-out but itemises no per-agent usage, the whole table is dropped and only the aggregate figures are posted. One plausible wrong number is worse than no number.
+
+Nothing from the transcript body reaches the comment. It is unsanitized tool output on a public repository, so only numbers, model names and subagent type names leave the runner — never prompt text, tool input, tool output or file contents. Same posture as the guard, for the same reason.
 
 Because a reusable workflow runs in the **caller's** context, the API key is always the caller's. An external consumer supplies their own `ANTHROPIC_API_KEY`; this repo's secrets are never in scope, and neither is its Anthropic bill.
 
@@ -280,9 +334,11 @@ secrets:
   # ... etc
 ```
 
-would be noisy and easy to miss when adding a new secret. `secrets: inherit` forwards everything the caller has access to, so adding a new required secret is a one-line change in the reusable.
+would be noisy and easy to miss when adding a new secret. `secrets: inherit` forwards everything the caller has access to, so adding a new secret is a one-line change in the reusable.
 
-The reusable declares which secrets are `required: true`, so a missing one fails with a clear error.
+**This is the default for callers inside `refokus-agency`**, where the caller and the reusables share maintainers. An external caller gets the same blanket forward — every secret it holds, declared or not — against a floating `@v1` tag it doesn't control, which is a materially different trade. Those callers should enumerate instead: see [secrets.md](secrets.md#calling-from-outside-refokus-agency).
+
+Note that every declared secret is `required: false`. A secret declared as required fails the run at startup for every caller that hasn't configured it, so the reusables gate the steps that need a secret instead of demanding it up front.
 
 ### Versioning with release-please
 
@@ -360,11 +416,11 @@ An alternative would be to publish the composite action as a standalone GitHub A
 
 ### Why `code-review.yml`'s platform checkout is not like the others
 
-It is the one reusable that does not check out `refokus-agency/platform` into `.platform/` **for the composite `setup` action**. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above. Since [#79](https://github.com/refokus-agency/platform/issues/79) it does take a secondary checkout — for the guard script, and for nothing else.
+It is the one reusable that does not check out `refokus-agency/platform` into `.platform/` **for the composite `setup` action**. That is deliberate, not an oversight in the invariant described in [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo) above. Since [#79](https://github.com/refokus-agency/platform/issues/79) it does take a secondary checkout — for the post-run scripts in `.github/scripts`, and for nothing else. There are two of them now: the guard from [#79](https://github.com/refokus-agency/platform/issues/79) and the telemetry reporter from [#94](https://github.com/refokus-agency/platform/issues/94).
 
 In the other reusables that checkout exists for exactly one reason: reaching the local composite `setup` action. `code-review.yml` never calls `setup` — `claude-code-action` ships its own runtime and installs what it needs. Worse, calling `setup` here would hard-fail: it detects the package manager from a lockfile, and `platform` has no `package.json` at all, so it would exit with `::error::No lockfile found`.
 
-A checkout with no consumer is just latency and one more moving part — which held exactly until the guard step gave it one. So the checkout it does take is kept as narrow as the need: sparse (`.github/scripts` only), and placed *after* the review rather than before it, so platform's files are not sitting in the workspace while the review reads an untrusted pull request head. `setup` is still never called here, which is the half of this that was always load-bearing.
+A checkout with no consumer is just latency and one more moving part — which held exactly until the guard step gave it one. So the checkout it does take is kept as narrow as the need: sparse (`.github/scripts` only), and placed *after* the review rather than before it, so platform's files are not sitting in the workspace while the review reads an untrusted pull request head. It is sparse on the whole directory rather than on one file, which is why [#94](https://github.com/refokus-agency/platform/issues/94) added a second consumer without adding a second checkout. `setup` is still never called here, which is the half of this that was always load-bearing.
 
 ### Why is `platform` public?
 

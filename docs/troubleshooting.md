@@ -182,6 +182,23 @@ If you need the turn-by-turn detail, set `show-full-output: true` on your caller
 
 **Fix:** drop the override and inherit the defaults — that is what they are for, and neither [examples/comment-code-review.yml](../examples/comment-code-review.yml) nor this repo's own caller overrides either input. If you genuinely need to override, copy the current default out of [.github/workflows/code-review.yml](../.github/workflows/code-review.yml) verbatim and add to it rather than writing one from scratch. Full argument in [architecture.md → Two input defaults that look redundant and are not](architecture.md#two-input-defaults-that-look-redundant-and-are-not).
 
+## No telemetry comment appeared after a code review
+
+**Symptoms:** the review ran and commented, but the separate **Run telemetry** comment — cost, turns, duration, per-agent context — is missing. Or it appeared with the aggregate line and no per-agent table.
+
+**Start with the run log.** The telemetry step never fails the job, so it reports every one of its own dead ends as a `::notice::` instead. Open the `Report run telemetry` step and read it — the notice names the cause directly, and the list below just expands on what each one means.
+
+**Causes:**
+
+1. **The review was skipped by one of the four eligibility gates.** No run, no spend, no comment — by design. The gate that fired left its own `::notice::` in an earlier step.
+2. **`::notice::… could not comment on pull request #N`** — your caller has not granted `pull-requests: write`. The review's own comment would have failed the same way; if that one landed and this one did not, check that the caller did not narrow permissions between them.
+3. **`::notice::… no run transcript to report on`** — the action produced no `execution_file`. Usually the review never started (an auth failure, a cancelled run). The `Verify review outcome` step above will have more to say about it.
+4. **`::notice::… the run transcript is not valid JSON`** — the run was killed while the action was still writing the transcript, or `claude-code-action` changed the file's format. If the run itself looks healthy, suspect the format: the script expects a single JSON array of `SDKMessage`, and the action pins its own moving CLI version.
+5. **`::notice::… the reporting script is missing`** — the `Checkout platform repo` step failed, so `.platform/.github/scripts/` is not on disk. Transient GitHub failures do this; re-run the job.
+6. **The comment has no per-agent table.** Either the run genuinely fanned out to nothing, or — the more likely one — the transcript carries `Task` calls but no itemised per-agent usage, and the table was dropped on purpose rather than rendered with the main agent standing alone. The notice says which. See [architecture.md → What the run reports about itself](architecture.md#what-the-run-reports-about-itself) for why all-or-nothing is the right behaviour there.
+
+**Not a cause:** a red job. The step carries `continue-on-error: true` and the script cannot exit non-zero, so a missing telemetry comment never shows up as a failed check. If the job is red, something else made it red — read `Verify review outcome`.
+
 ## Code review shows `permission_denied` on a tool that IS in `allowed-tools`
 
 **Symptoms:** the transcript denies a `Bash` call whose command clearly matches an allowlist entry — `gh pr diff ...` against `Bash(gh pr diff:*)`, say. The `decision_reason` is not about permission at all; it reads `Contains for_statement`, `Contains simple_expansion`, `Contains command_substitution` or similar.

@@ -5,6 +5,10 @@
 # when a human asks. Ask again after a push to re-review the new head. No guards are needed in
 # this file: the reusable's own gates handle the credential, actor and fork checks and skip green
 # with a reason in the run log. See docs/architecture.md#four-gates-all-skipping-green.
+#
+# Every `secrets: inherit` below — there is one per job — assumes your repo is in the
+# refokus-agency org. Calling from another organization? Swap each one for an explicit
+# secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
 
 name: Code Review
 
@@ -23,16 +27,6 @@ permissions:
   # cannot authenticate and the run fails. The reusable cannot detect the omission
   # from the inside, so it has to be granted here.
   id-token: write
-
-concurrency:
-  # `github.event.issue.number` IS the pull request number on `issue_comment` — the payload
-  # carries no `pull_request` object, so the usual `github.event.pull_request.number` is empty
-  # here and would collapse every pull request into one concurrency group.
-  group: ${{ github.workflow }}-${{ github.event.issue.number }}
-  # false, not true: `concurrency` is per-run and the phrase is checked in the reusable's job
-  # `if:`, so ANY comment joins the group and `true` would cancel a running review.
-  # See docs/architecture.md#why-the-caller-sets-cancel-in-progress-false.
-  cancel-in-progress: false
 
 jobs:
   code-review:

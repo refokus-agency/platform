@@ -6,7 +6,7 @@ This guide walks through setting up a **new repo** with the centralized CI/CD. I
 
 Before you start, make sure:
 
-- Your repo lives in the `refokus-agency` organization.
+- Your repo lives in the `refokus-agency` organization. This is what makes the `secrets: inherit` line in every example safe to copy as-is — `inherit` forwards your whole secret set to the reusable. Calling from another org? Use an explicit secrets map instead: see [secrets.md](secrets.md#calling-from-outside-refokus-agency).
 - The required secrets are available to the repo (see [secrets](secrets.md)).
 - Your `package.json` has the scripts you want CI to run (`lint`, `typecheck`, `test`, `build` — all optional).
 - For Vercel-deployed projects: a Vercel project exists and `VERCEL_PROJECT_ID` is set at the repo level.

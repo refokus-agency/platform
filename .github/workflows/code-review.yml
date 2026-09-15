@@ -187,6 +187,21 @@ on:
         required: false
         type: string
         default: '1'
+      timeout-minutes:
+        description: |
+          Ceiling, in minutes, on the review job. GitHub's own default is 360 — six hours.
+
+          It exists because of the concurrency group on the same job. Reviews for a pull request
+          now queue behind each other, so a review that hangs stops being a self-contained
+          annoyance and becomes a blocker for every request behind it. The cap kills the job and
+          releases the group.
+
+          Raise it if your reviews are legitimately long. Hitting it terminates the job outright —
+          there is no graceful finish and no review comment, so pick a value you would rather see
+          than a run that never ends.
+        required: false
+        type: number
+        default: 30
       allowed-bots:
         description: |
           Comma-separated list of bot actors whose review requests should be honoured, or '*' for
@@ -249,6 +264,34 @@ jobs:
       inputs.trigger-phrase != '' &&
       contains(github.event.comment.body, inputs.trigger-phrase)
     runs-on: ubuntu-latest
+    # Serialization is owned here, not by the caller. A caller-side `concurrency` cannot read
+    # this workflow's `inputs`, so its group takes in EVERY issue_comment in the repo — and
+    # GitHub cancels a PENDING run in a group unconditionally, `cancel-in-progress: false` or
+    # not. That killed genuine queued reviews. See
+    # docs/architecture.md#why-serialization-lives-in-the-reusable-not-the-caller.
+    concurrency:
+      # Comments carrying the phrase collapse onto the shared '-request' key and queue behind
+      # each other. A comment without it falls to its own `comment.id` and is therefore alone in
+      # its group, contending with nothing. That makes behaviour identical whether the job `if:`
+      # is evaluated before or after the group is joined — the ordering is undocumented, and
+      # this removes the need to know it.
+      group: >-
+        code-review-${{ github.repository }}-${{ github.event.issue.number }}-${{
+        inputs.trigger-phrase != '' && contains(github.event.comment.body, inputs.trigger-phrase)
+        && 'request' || github.event.comment.id }}
+      # false, not true: a second `@claude review` is a second request, not a replacement for
+      # the first. `true` belongs to `synchronize`, where a new push obsoletes the old review.
+      cancel-in-progress: false
+    # Bounded because the group above can now hold a queue. Before it, a hung review
+    # inconvenienced only itself; now it would hold every queued review for GitHub's
+    # 360-minute default. Caller-overridable via the `timeout-minutes` input.
+    #
+    # `fromJSON` is mandatory, not decoration. A `type: number` input interpolates through
+    # `${{ }}` as a JSON token, and `timeout-minutes` parses a raw integer — bare
+    # `${{ inputs.timeout-minutes }}` fails workflow validation with "Unexpected value",
+    # killing the job before a single step runs. actionlint does not catch it; it is an
+    # evaluation-time error, not a schema violation. See actions/runner#1555.
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
     # grant it or the run fails at startup. Callers need `contents: read`,
@@ -456,12 +499,12 @@ jobs:
             ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
 
       - name: Checkout platform repo (for the guard script)
-        # The one consumer this reusable now has for a secondary checkout — see
+        # The only two consumers this reusable has for a secondary checkout — see
         # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
         #
         # After the review, not before: the pull request head is untrusted, and platform's files
         # have no business sitting in the workspace while the review reads it. Sparse, because the
-        # guard script is the only thing needed.
+        # guard script and the telemetry script are the only things needed.
         #
         # NOT anonymous, despite platform being public: no `token:` is set, so checkout falls back
         # to its default of `${{ github.token }}` and authenticates the fetch. That is worth
@@ -505,4 +548,31 @@ jobs:
           fi
 
           .platform/.github/scripts/review-guard.sh
+        shell: bash
+
+      - name: Report run telemetry
+        # Same gate as the guard above, and for the same reason: `always()` because the money is
+        # spent whether or not the review finished, and the same `eligible` output so the four
+        # gates keep skipping green and in silence.
+        #
+        # `continue-on-error` is the second of two independent guards. The script itself cannot
+        # exit non-zero — read the contract at the top of it — and this is the belt to that
+        # brace. Telemetry is additive information, never a verdict, and `@v1` is force-moved
+        # onto every consumer repo in the org, so no bug in here may ever redden a caller's CI.
+        # The guard step above deliberately does NOT carry this; don't copy it upward.
+        if: always() && steps.pr.outputs.eligible == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+        run: |
+          # Unlike the guard, a missing script is a notice and not an error. An unverified review
+          # is a result the caller has to see; an unreported cost is not.
+          if [ ! -x .platform/.github/scripts/report-run-telemetry.sh ]; then
+            echo "::notice::[code-review] telemetry: the reporting script is missing (the platform checkout failed, outcome: ${{ steps.guard-checkout.outcome }}). Skipping."
+            exit 0
+          fi
+
+          .platform/.github/scripts/report-run-telemetry.sh
         shell: bash
