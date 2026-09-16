@@ -1,0 +1,8 @@
+# The same defect abbreviated. The API resolves abbreviations from 5 characters, so
+# matching only the full SHA would leave this through. Expected findings: 1.
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 3d3c42e

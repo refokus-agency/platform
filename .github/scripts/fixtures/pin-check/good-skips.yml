@@ -1,0 +1,12 @@
+# Refs that are not pinnable, plus the comment-line decoy. Expected findings: 0.
+on: pull_request
+jobs:
+  local-step:
+    runs-on: ubuntu-latest
+    steps:
+      # The next line is prose, not a ref. A naive grep for 'uses:' matches it.
+      # uses: decoy/trap@v9
+      - uses: ./.github/actions/setup
+      - uses: docker://alpine:3.20
+  local-reusable:
+    uses: ./.github/workflows/ci.yml

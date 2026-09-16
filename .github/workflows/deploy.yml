@@ -93,14 +93,14 @@ jobs:
 
       - name: Checkout caller repo
         if: ${{ !inputs.transferred }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.CHECKOUT_TOKEN || github.token }}
 
       - name: Checkout platform repo (for composite actions)
         if: ${{ !inputs.transferred }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
@@ -175,7 +175,7 @@ jobs:
 
       - name: Comment deploy URL on PR
         if: ${{ !inputs.transferred && github.event_name == 'pull_request' }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           DEPLOY_ENV: ${{ inputs.environment }}
@@ -212,7 +212,7 @@ jobs:
         # Only for the persistent environments (production/stage). Preview PR
         # deploys are ephemeral and already surfaced via the PR comment above.
         if: ${{ !inputs.transferred && (inputs.environment == 'production' || inputs.environment == 'stage') }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           ENVIRONMENT: ${{ inputs.environment }}
