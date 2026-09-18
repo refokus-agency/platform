@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.12.0](https://github.com/refokus-agency/platform/compare/v1.11.0...v1.12.0) (2026-09-18)
+
+
+### Features
+
+* **workflows:** pin third-party actions by commit SHA in secrets-bearing jobs ([#98](https://github.com/refokus-agency/platform/issues/98)) ([caf20e5](https://github.com/refokus-agency/platform/commit/caf20e5cc848446802a25b5623e9683f4493f22f))
+
 ## [1.11.0](https://github.com/refokus-agency/platform/compare/v1.10.3...v1.11.0) (2026-09-15)
 
 
