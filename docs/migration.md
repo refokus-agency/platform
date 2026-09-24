@@ -97,6 +97,7 @@ Compared to the common pre-migration patterns:
 - **Preview deploy triggers on `pull_request`, not on every push.** If your devs pushed feature branches without opening PRs to get previews, they'll now need to open a PR (draft works) to get the preview URL.
 - **CI is stricter.** The new CI runs `lint`, `typecheck`, `test`, and `build` if the scripts exist. Many older workflows only ran `test`. Missing scripts are silently skipped; broken ones will surface.
 - **Node pins at 24** unless the caller overrides `node-version`. Most repos update cleanly.
+- **pnpm follows `package.json`.** If `package.json` pins `packageManager` (or `devEngines.packageManager`), that version is used. Otherwise pnpm `10` is used. If your old workflow passed a pnpm version, drop it, or make it match `packageManager` exactly: `pnpm-version: '11'` against `pnpm@11.17.0` fails. Only `packageManager` is checked: against `devEngines.packageManager` a passed version wins with no error, so drop it there. `bun-version` is also forwarded and defaults to `latest`.
 
 ## Verifying the migration
 
