@@ -482,7 +482,7 @@ jobs:
         # be exposed as a workflow input. Do not hand-edit the SHA — Dependabot's weekly
         # github-actions run bumps it and its version comment together, and the pin-check
         # gate rejects a comment that does not match its SHA.
-        uses: anthropics/claude-code-action@7b0b255830a1fab6e602658672acad11c12d841d # v1.0.226
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1.0.231
         with:
           prompt: ${{ inputs.prompt }}
           plugins: ${{ inputs.plugins }}
