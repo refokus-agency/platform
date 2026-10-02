@@ -68,6 +68,14 @@ The examples work out of the box. Tweak only if you need to:
     node-version: '22'
   ```
 
+- **Change the pnpm or bun version.** `ci.yml`, `deploy.yml` and `release.yml` accept `pnpm-version` and `bun-version`. You usually don't need `pnpm-version`: left empty, the version comes from `package.json` (`devEngines.packageManager` or `packageManager`), with pnpm `10` as the fallback when `package.json` declares none. If you do set it, it must match `packageManager` exactly, or setup fails with "Multiple versions of pnpm specified" (see [troubleshooting](troubleshooting.md#setup-fails-with-multiple-versions-of-pnpm-specified)). That check covers `packageManager` only: if pnpm is declared only in `devEngines.packageManager`, a set `pnpm-version` wins with no error, so leave it empty. `bun-version` defaults to `latest`.
+
+  ```yaml
+  with:
+    pnpm-version: '11.17.0' # must equal packageManager: pnpm@11.17.0, if set
+    bun-version: '1.2.0'
+  ```
+
 - **Skip a CI step.** If your repo doesn't have a `lint` script (or doesn't want it run), it'll be skipped automatically. But you can also disable it explicitly:
 
   ```yaml

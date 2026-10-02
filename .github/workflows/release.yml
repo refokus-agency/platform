@@ -13,6 +13,23 @@ on:
         required: false
         type: string
         default: ''
+      pnpm-version:
+        description: |
+          pnpm version, used only when the package manager is pnpm. Leave empty
+          (the default) to use the version package.json declares
+          (devEngines.packageManager or packageManager), falling back to pnpm 10
+          when it declares none. When set, it must match packageManager exactly:
+          '11' against 'pnpm@11.17.0' fails with "Multiple versions of pnpm specified".
+          Only packageManager is checked: against devEngines.packageManager an
+          explicit value wins with no error, so leave it empty.
+        required: false
+        type: string
+        default: ''
+      bun-version:
+        description: bun version, used only when the package manager is bun.
+        required: false
+        type: string
+        default: 'latest'
       platform-ref:
         description: Ref of the platform repo to checkout for composite actions.
         required: false
@@ -154,6 +171,8 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           package-manager: ${{ inputs.package-manager }}
+          pnpm-version: ${{ inputs.pnpm-version }}
+          bun-version: ${{ inputs.bun-version }}
           unsafe-install-scripts: ${{ inputs.unsafe-install-scripts }}
 
       - name: Ensure npm supports OIDC Trusted Publishing
