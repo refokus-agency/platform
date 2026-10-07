@@ -27,6 +27,15 @@
 # Every `secrets: inherit` below — there is one per job — assumes your repo is in the
 # refokus-agency org. Calling from another organization? Swap each one for an explicit
 # secrets map: see docs/secrets.md#calling-from-outside-refokus-agency.
+#
+# `pnpm-version` is optional (set it under `with:`). Leave it out and the pnpm version
+# is auto-resolved from your package.json (devEngines.packageManager or packageManager),
+# falling back to pnpm 10 when package.json declares none. If you set it, it must be the
+# exact version `packageManager` pins: `pnpm-version: '11'` against
+# `"packageManager": "pnpm@11.17.0"` fails with "Multiple versions of pnpm specified".
+# Only `packageManager` is checked: with pnpm declared only in `devEngines.packageManager`,
+# a set `pnpm-version` wins with no error, so leave it out.
+# `bun-version` (default `latest`) is forwarded the same way for bun projects.
 
 name: Release
 

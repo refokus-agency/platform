@@ -78,6 +78,23 @@ Common failure modes when using the centralized workflows, and how to fix them.
 - Delete the stale lockfile from your repo.
 - Or pass `package-manager: <pm>` explicitly in the caller to override.
 
+## Setup fails with "Multiple versions of pnpm specified"
+
+**Symptoms:** the `Setup pnpm` step fails with:
+
+```
+Error: Multiple versions of pnpm specified:
+  - version 11 in the GitHub Action config with the key "version"
+  - version pnpm@11.17.0 in the package.json with the key "packageManager"
+```
+
+**Cause:** the caller passes `pnpm-version` AND `package.json` pins `packageManager`, and the two strings differ. `pnpm/action-setup` compares them exactly, so a major-only `'11'` does not match `pnpm@11.17.0`. It never checks `devEngines.packageManager`: a pnpm declared only there raises no error, and the explicit `pnpm-version` silently wins instead.
+
+**Fix:**
+
+- Remove `pnpm-version` from the caller's `with:` block (recommended). The setup action then uses the version `package.json` declares, and the `Resolve pnpm version` step logs `source: packageManager`.
+- Or pass the exact version `package.json` pins: `pnpm-version: '11.17.0'`. You then have two places to keep in sync.
+
 ## Deploys work on preview but fail on production
 
 **Symptoms:** `deploy-preview` is green, `deploy-production` fails.
