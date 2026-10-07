@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [1.12.1](https://github.com/refokus-agency/platform/compare/v1.12.0...v1.12.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **workflows:** forward pnpm-version and resolve it from package.json ([#108](https://github.com/refokus-agency/platform/issues/108)) ([#109](https://github.com/refokus-agency/platform/issues/109)) ([55d7b8c](https://github.com/refokus-agency/platform/commit/55d7b8c1d2c53f9b99430cb078cc508a4792c9ff))
+
 ## [1.12.0](https://github.com/refokus-agency/platform/compare/v1.11.0...v1.12.0) (2026-09-18)
 
 
