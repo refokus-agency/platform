@@ -139,7 +139,7 @@ jobs:
       - name: Mint release token (GitHub App)
         id: app-token
         if: env.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -192,7 +192,7 @@ jobs:
 
       - name: Semantic release (GitHub Packages)
         if: inputs.registry == 'github-packages'
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        uses: cycjimmy/semantic-release-action@bda3da8d0cac44ed30fdc42bf9ad6a0362ce0583 # v8.0.1
         with:
           ci: true
           semantic_version: ${{ inputs.semantic-release-version }}
@@ -207,7 +207,7 @@ jobs:
       # tagging and the @semantic-release/git push.
       - name: Semantic release (public npm via OIDC)
         if: inputs.registry == 'npm'
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        uses: cycjimmy/semantic-release-action@bda3da8d0cac44ed30fdc42bf9ad6a0362ce0583 # v8.0.1
         with:
           ci: true
           semantic_version: ${{ inputs.semantic-release-version }}
