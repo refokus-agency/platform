@@ -113,7 +113,9 @@ on:
           or `🟠 PLAUSIBLE`. Next comes the problem, then the evidence that proves it — or, for a
           PLAUSIBLE finding, "Unverified:" and why it could not be proven. Every comment ends with
           a section titled "Suggestion": a committable `suggestion` block when that block fully
-          fixes the issue, otherwise the fix described in text.
+          fixes the issue, otherwise the fix described in text. A `suggestion` block replaces only
+          the lines of its own finding, never lines another finding owns: when two findings touch
+          the same lines, put one combined block on one of them and point to it from the other.
 
           Then post exactly one summary comment, with `gh pr comment` and not `gh api`, whether or
           not you found anything. Where the command posts a summary only when it found no issues,
