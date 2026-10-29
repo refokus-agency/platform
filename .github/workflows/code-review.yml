@@ -36,18 +36,22 @@ on:
       prompt:
         description: |
           Instructions for Claude. Defaults to the code-review plugin's slash command against the
-          pull request the triggering comment was posted on, followed by a narrow override of that
-          command's step 1.
+          pull request the triggering comment was posted on, followed by overrides of that
+          command. Its eligibility check stops refusing on "Claude already commented", "the pull
+          request is a draft" and "the diff is trivial", and says on the pull request why when a
+          remaining stop condition (closed, automated) does fire. Its review agents run in the
+          foreground. Every finding gets a verdict — CONFIRMED and PLAUSIBLE are posted, REJECTED
+          never is — and a summary comment goes up on every review. Full argument in
+          docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
 
-          The override lifts three of step 1's stop conditions — "Claude already commented", "the
-          pull request is a draft" and "the diff is trivial" — requires the command to post a
-          pull request comment naming any remaining stop condition (closed, automated) before it
-          ends the run, and requires the review's fan-out to run in the foreground. Full argument
-          in docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
+          The "Resolve review context" step appends data blocks after this text, such as the
+          reviewed commit, so the first line must stay the bare slash command.
 
-          If you override this input, carry all three parts forward. Passing the bare slash
-          command restores the one-review-per-pull-request dead end AND reintroduces the silent
-          background fan-out of #91.
+          If you override this input, start from the current default and add to it. An override
+          replaces the default whole, so it also replaces the verdict and summary instructions:
+          whatever you leave out is lost, by design. The context blocks are still appended.
+          Passing the bare slash command restores the one-review-per-pull-request dead end AND
+          reintroduces the silent background fan-out of #91.
         required: false
         type: string
         # A block scalar is required, not cosmetic: the override has to reach the CLI as later
@@ -57,9 +61,10 @@ on:
         default: |
           /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
-          Override step 1 of that command on three points, and add two requirements to it.
+          The paragraphs below override that command wherever they disagree with it: first its
+          eligibility check, then how its agents run, then how findings are judged and reported.
 
-          First, three of its stop conditions do not apply here. An earlier review comment from
+          First, three of the eligibility check's stop conditions do not apply here. An earlier review comment from
           Claude on this pull request is not a reason to stop — that comment reviewed an earlier
           commit, and a human has just asked, by comment, for the current head to be reviewed.
           Draft status is not a reason to stop either, for the same reason: the request is
@@ -84,6 +89,49 @@ on:
           reports. That failure is invisible from the outside — a green check, zero findings
           collected and no comment. Collect every agent's findings yourself, in-turn, before you
           write anything on the pull request.
+
+          Give every finding a verdict. The agents that find issues propose one, and the agents
+          that validate each issue settle it, as exactly one of:
+
+          - CONFIRMED — proven from the code this run can read: you can name the input, the path
+            or the line that triggers it. Post it with an explanation of the problem and the
+            evidence that proves it.
+          - PLAUSIBLE — likely real, but not provable from here: it depends on runtime behaviour,
+            data or code outside the checkout. Post it anyway, marked as unverified, and state why
+            it could not be proven. Do not drop it as unvalidated: where the command says to drop
+            issues its validators did not confirm, that applies to REJECTED findings only.
+          - REJECTED — disproved, or not a real issue. Never post it anywhere on the pull request,
+            inline or in the summary text; it only counts towards the summary's totals.
+
+          A CONFIRMED or PLAUSIBLE finding that is already fixed by another pull request, open or
+          merged, is covered elsewhere. List it in the summary only, naming that pull request,
+          and do not post it inline. A REJECTED finding stays unnamed even then.
+
+          Post one inline comment per CONFIRMED or PLAUSIBLE finding that is not covered
+          elsewhere, with mcp__github_inline_comment__create_inline_comment, and format every one
+          the same way. Its first line is the finding's verdict and nothing else: `🟢 CONFIRMED`
+          or `🟠 PLAUSIBLE`. Next comes the problem, then the evidence that proves it — or, for a
+          PLAUSIBLE finding, "Unverified:" and why it could not be proven. Every comment ends with
+          a section titled "Suggestion": a committable `suggestion` block when that block fully
+          fixes the issue, otherwise the fix described in text. A `suggestion` block replaces every
+          line its comment spans, so it never spans lines another finding owns: when the lines of
+          two findings overlap, anchor one of their comments on all the lines of both, put one
+          combined block there, and make the other comment's Suggestion text pointing to it.
+
+          Then post exactly one summary comment, with `gh pr comment` and not `gh api`, whether or
+          not you found anything. Where the command posts a summary only when it found no issues,
+          this replaces that rule: the summary goes up on every review, beside the inline comments
+          and never instead of them. It states the intent of the change, read from the pull
+          request's title, body and diff; what was checked — the reviewed commit from the context
+          below, and the site checked, or "No site was checked" when no site context is given; the
+          count of findings per verdict; and the findings covered elsewhere. The author still
+          decides whether each finding is actionable, so report, do not instruct.
+
+          Pass the summary as one single-quoted argument, `gh pr comment <number> --body '...'`,
+          and write its text without apostrophes: no heredoc, no `--body-file`, no `$(...)`, no
+          pipe or redirection. The allowlist matches `gh pr comment` by prefix and rejects a
+          command that carries a shell construct, and a rejected summary leaves the pull request
+          with nothing. If the call is denied anyway, rewrite it in that shape and post it again.
 
           Review the current head.
       model:
@@ -444,6 +492,65 @@ jobs:
           echo "head-sha=${head_sha}" >> "$GITHUB_OUTPUT"
         shell: bash
 
+      - name: Resolve review context
+        id: context
+        if: steps.pr.outputs.eligible == 'true'
+        # Appends data blocks AFTER the caller's prompt, never before it: line 1 has to stay the
+        # bare slash command, or the command is not recognised as one. Each block is optional and
+        # present only when its data is, so an overridden `prompt` still gets them. Inline shell
+        # rather than a script, because the platform checkout only happens after the review — see
+        # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
+        #
+        # Both values arrive through `env:` and are never interpolated into the script: the
+        # prompt is caller text, and `${{ }}` inside `run:` would execute it as shell.
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
+        run: |
+          # One function per block, each printing its block or nothing. A new block adds one
+          # function here and one quoted `"$(block_x)"` entry to `blocks` in `compose`, and fetches
+          # its own data.
+          block_commit() {
+            # Validated, not trusted: anything but a full lowercase SHA is dropped, not quoted.
+            if [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              printf 'Reviewed commit: %s\n' "$HEAD_SHA"
+              printf 'This is the commit checked out for this review. Name it in the summary as the commit that was checked.'
+            fi
+          }
+
+          compose() {
+            local block trimmed
+            local -a blocks
+            # A blank prompt passes through untouched: blocks with no slash command in front of
+            # them would turn a misconfigured caller into an instruction-less run of the agent.
+            if [[ -z "${PROMPT//[[:space:]]/}" ]]; then
+              printf '%s' "$PROMPT"
+              return
+            fi
+            # Trailing newlines are dropped (command substitution strips them) so that every block
+            # sits after exactly one blank line, however the prompt ends.
+            trimmed=$(printf '%s' "$PROMPT")
+            printf '%s' "$trimmed"
+            blocks=("$(block_commit)")
+            for block in "${blocks[@]}"; do
+              if [ -n "$block" ]; then
+                printf '\n\n%s' "$block"
+              fi
+            done
+          }
+
+          # A fixed delimiter such as EOF would let a prompt line reading `EOF` end the value early
+          # and write whatever follows as further step outputs. A per-run random one cannot be
+          # guessed by text written before the run.
+          delimiter="ghadelimiter_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          {
+            echo "prompt<<${delimiter}"
+            compose
+            echo
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: Acknowledge request
         if: steps.pr.outputs.eligible == 'true'
         # Best-effort 👀 acknowledgement — the only feedback a comment trigger gets while the
@@ -484,7 +591,8 @@ jobs:
         # gate rejects a comment that does not match its SHA.
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
-          prompt: ${{ inputs.prompt }}
+          # The composed prompt, not `inputs.prompt`: the caller's text plus the context blocks.
+          prompt: ${{ steps.context.outputs.prompt }}
           plugins: ${{ inputs.plugins }}
           plugin_marketplaces: ${{ inputs.plugin-marketplaces }}
           track_progress: ${{ inputs.track-progress }}
