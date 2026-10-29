@@ -68,7 +68,7 @@ has_tool_use() {
 # is not evidence that a comment was posted: `grep -rn "gh pr comment" .github/` contains it and
 # posts nothing. A false "it commented" is the same class of bug this whole script exists to
 # remove, so the phrase has to be what the command actually invokes — allowing for a leading
-# `cd ... &&`, a pipeline segment or a `;` sequence in front of it.
+# `cd ... &&`, a pipeline segment, a `;` sequence or an earlier line in front of it.
 #
 # And a call is an attempt, not a comment. The allowlist matches `gh pr comment` by prefix and
 # denies a command carrying a shell construct, and a denied or failed call still leaves its
@@ -94,7 +94,7 @@ has_comment_signal() {
                .name == "Bash"
                and ((.input.command? // "")
                     | tostring
-                    | test("(^|[;&|]|&&|\\|\\|)[[:space:]]*gh[[:space:]]+pr[[:space:]]+comment\\b"))
+                    | test("(^|[;&|\n]|&&|\\|\\|)[[:space:]]*gh[[:space:]]+pr[[:space:]]+comment\\b"))
              end))
   ' <"$EXECUTION_FILE" >/dev/null 2>&1
 }
