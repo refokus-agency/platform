@@ -255,11 +255,14 @@ on:
         default: false
       platform-ref:
         description: |
-          Ref of the platform repo to check out for the guard script that "Verify review outcome"
-          runs. Defaults to 'main', matching the sibling reusables.
+          Ref of the platform repo to check out for the scripts this workflow runs:
+          review-context.sh, which composes the prompt before the review, and the guard and
+          telemetry scripts after it. Defaults to 'main', matching the sibling reusables. If
+          review-context.sh is missing at this ref, the review runs with the caller's prompt alone
+          and logs a warning.
 
-          Point it at your branch when testing a change to that script — otherwise the guard runs
-          the copy on main against your workflow. See
+          Point it at your branch when testing a change to those scripts — otherwise they run
+          from the copy on main against your workflow. See
           docs/contributing.md#option-a-test-against-your-branch-in-a-real-repo.
         required: false
         type: string
@@ -530,14 +533,34 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         shell: bash
 
+      - name: Checkout platform repo (for the context script)
+        # The first of this reusable's two platform checkouts, and the only one before the review:
+        # "Resolve review context" runs a script out of it, and "Resolve review context" deletes it
+        # again before the pull request head is checked out, so platform's files are never in the
+        # workspace while the review reads that head. See
+        # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
+        #
+        # `continue-on-error`: a failed checkout costs the review its context blocks, never the
+        # review. The next step falls back to the caller's prompt and says so.
+        if: steps.pr.outputs.eligible == 'true'
+        id: context-checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          sparse-checkout: .github/scripts
+          # Same reason as the other two checkouts: the next step executes a file out of this
+          # checkout with a token in its environment, and nothing here pushes.
+          persist-credentials: false
+
       - name: Resolve review context
         id: context
         if: steps.pr.outputs.eligible == 'true'
-        # Appends data blocks AFTER the caller's prompt, never before it: line 1 has to stay the
-        # bare slash command, or the command is not recognised as one. Each block is optional and
-        # present only when its data is, so an overridden `prompt` still gets them. Inline shell
-        # rather than a script, because the platform checkout only happens after the review — see
-        # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
+        # The caller's prompt plus the context blocks, composed by
+        # .github/scripts/review-context.sh — which documents the blocks and is tested by
+        # .github/scripts/test-review-context.sh.
         #
         # Every value arrives through `env:` and is never interpolated into the script: the
         # prompt is caller text, and `${{ }}` inside `run:` would execute it as shell.
@@ -548,135 +571,22 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number }}
           BASE_REF: ${{ steps.pr.outputs.base-ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CHECKOUT_OUTCOME: ${{ steps.context-checkout.outcome }}
         run: |
-          # One function per block, each printing its block or nothing. A new block adds one
-          # function here and one quoted `"$(block_x)"` entry to `blocks` in `compose`, and fetches
-          # its own data.
-          block_commit() {
-            # Validated, not trusted: anything but a full lowercase SHA is dropped, not quoted.
-            if [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              printf 'Reviewed commit: %s\n' "$HEAD_SHA"
-              printf 'This is the commit checked out for this review. Name it in the summary as the commit that was checked.'
-            fi
-          }
+          # Gone before this step ends, whatever happens in it: the next checkout is the pull
+          # request head, and platform's files have no business in the workspace during the review.
+          trap 'rm -rf .platform' EXIT
 
-          # The related-PRs lookups. Each prints one `<number>\t<relation>\t<status>` line per pull
-          # request it finds, and on failure a `::warning::` to stderr, so that the warning reaches
-          # the run log and never the prompt. Only the number, a fixed relation and a status derived
-          # from `state` and `merged_at` are read: titles, bodies and branch names are author text.
-          related_lines() {
-            # $1: the relation; $2: the jq path to the pull request objects in the JSON on stdin.
-            # Only `open` and `closed` are mapped. Anything else — a missing state, a new value, a
-            # change of case — becomes `unknown`, which block_related drops with a warning, rather
-            # than defaulting to "closed without merging", which the prompt reads as "fixes nothing".
-            jq -r --arg rel "$1" "$2"' | [.number, $rel,
-              (if .state == "open" then "open"
-               elif .state == "closed" and .merged_at != null then "merged"
-               elif .state == "closed" then "closed without merging"
-               else "unknown" end)] | @tsv'
-          }
-
-          related_failed() {
-            echo "::warning::[code-review] related pull requests lookup failed: $1. The review runs without its entries; see docs/troubleshooting.md." >&2
-          }
-
-          related_stack() {
-            local out lines
-            if ! out=$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
-                "repos/${GITHUB_REPOSITORY}/stacks?pull_request=${PR_NUMBER}") \
-              || ! lines=$(printf '%s' "$out" | related_lines stack '.[] | (.pull_requests // [])[]'); then
-              related_failed stack
-              return 0
-            fi
-            printf '%s\n' "$lines"
-          }
-
-          related_siblings() {
-            local base out lines
-            # On the default branch every open pull request is a "sibling", which says nothing.
-            if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "$DEFAULT_BRANCH" ]; then
-              return 0
-            fi
-            # The branch name goes into a query string, so it is encoded, never pasted.
-            base=$(jq -rn --arg b "$BASE_REF" '$b | @uri')
-            # --paginate prints one JSON array per page; jq reads them as a stream.
-            if ! out=$(gh api --paginate \
-                "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=${base}&per_page=100") \
-              || ! lines=$(printf '%s' "$out" | related_lines sibling '.[]'); then
-              related_failed siblings
-              return 0
-            fi
-            printf '%s\n' "$lines"
-          }
-
-          related_chain() {
-            # Walks down a manual chain: the open pull request whose head is this one's base, then
-            # the one whose head is that one's base, and so on. Stops at the default branch, when no
-            # open pull request heads the branch, when a number repeats (a loop), or when more than
-            # one does (an ambiguous chain: all of them are listed, none is followed).
-            local branch=$BASE_REF seen=" $PR_NUMBER " head out lines next
-            while [ -n "$branch" ] && [ "$branch" != "$DEFAULT_BRANCH" ]; do
-              head=$(jq -rn --arg h "${GITHUB_REPOSITORY%%/*}:${branch}" '$h | @uri')
-              if ! out=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${head}&per_page=100") \
-                || ! lines=$(printf '%s' "$out" | related_lines base '.[]') \
-                || ! next=$(printf '%s' "$out" | jq -r 'if length == 1 then "\(.[0].number) \(.[0].base.ref)" else "" end'); then
-                related_failed 'base chain'
-                return 0
-              fi
-              if [ -n "$lines" ]; then
-                printf '%s\n' "$lines"
-              fi
-              if [ -z "$next" ] || [[ "$seen" == *" ${next%% *} "* ]]; then
-                return 0
-              fi
-              seen+="${next%% *} "
-              branch=${next#* }
-            done
-          }
-
-          block_related() {
-            local lines
-            # Re-validated here whatever the lookup printed: a line that is not exactly a number, a
-            # known relation and a known status is dropped. Each number is kept once, under the
-            # first lookup that found it, and the reviewed pull request is never listed. A dropped
-            # line does not mark its number as seen, so it never hides a valid line from a later
-            # lookup. A pull request whose status is `unknown` is named in a warning on stderr.
-            lines=$({ related_chain; related_stack; related_siblings; } | awk -F '\t' -v self="$PR_NUMBER" '
-              NF == 3 && $1 ~ /^[1-9][0-9]*$/ && $1 != self && $3 == "unknown" {
-                print "::warning::[code-review] related pull request #" $1 " has an unrecognised status and is not listed." > "/dev/stderr"
-                next
-              }
-              NF == 3 && $1 ~ /^[1-9][0-9]*$/ && $1 != self &&
-              $2 ~ /^(base|stack|sibling)$/ && $3 ~ /^(open|merged|closed without merging)$/ &&
-              !seen[$1]++ {
-                printf "- #%s (%s, %s)\n", $1, $2, $3
-              }')
-            if [ -n "$lines" ]; then
-              printf 'Related pull requests:\n%s\n' "$lines"
-              printf 'Only numbers, relations and statuses are listed here. Inspect any of them with gh pr view and gh pr diff.'
-            fi
-          }
-
-          compose() {
-            local block trimmed
-            local -a blocks
-            # A blank prompt passes through untouched: blocks with no slash command in front of
-            # them would turn a misconfigured caller into an instruction-less run of the agent.
-            if [[ -z "${PROMPT//[[:space:]]/}" ]]; then
-              printf '%s' "$PROMPT"
-              return
-            fi
-            # Trailing newlines are dropped (command substitution strips them) so that every block
-            # sits after exactly one blank line, however the prompt ends.
-            trimmed=$(printf '%s' "$PROMPT")
-            printf '%s' "$trimmed"
-            blocks=("$(block_commit)" "$(block_related)")
-            for block in "${blocks[@]}"; do
-              if [ -n "$block" ]; then
-                printf '\n\n%s' "$block"
-              fi
-            done
-          }
+          # Missing or failing script: the review still runs, with the caller's prompt alone. The
+          # script comes from `platform-ref`, which defaults to `main` and not to the ref this
+          # workflow runs from, so a broken `main` must not take every caller's review down.
+          script=.platform/.github/scripts/review-context.sh
+          if [ -x "$script" ] && composed=$("$script"); then
+            :
+          else
+            echo "::warning::[code-review] the review context could not be built (platform checkout: ${CHECKOUT_OUTCOME:-unknown}); the review runs with the caller's prompt only. See docs/troubleshooting.md."
+            composed=$PROMPT
+          fi
 
           # A fixed delimiter such as EOF would let a prompt line reading `EOF` end the value early
           # and write whatever follows as further step outputs. A per-run random one cannot be
@@ -684,8 +594,7 @@ jobs:
           delimiter="ghadelimiter_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
           {
             echo "prompt<<${delimiter}"
-            compose
-            echo
+            printf '%s\n' "$composed"
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
         shell: bash
@@ -746,7 +655,8 @@ jobs:
             ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
 
       - name: Checkout platform repo (for the guard script)
-        # The only two consumers this reusable has for a secondary checkout — see
+        # The second of this reusable's two platform checkouts; the first, for the context script,
+        # is deleted before the review. See
         # docs/architecture.md#why-code-reviewymls-platform-checkout-is-not-like-the-others.
         #
         # After the review, not before: the pull request head is untrusted, and platform's files

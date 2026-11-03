@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Stub `gh` for test-review-context.sh: answers `gh api ... <path>` from fixture files in
+# $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert on the calls made.
+#
+# Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`>.
+# <name>.out is printed (default `[]`); <name>.rc is the exit code (default 0).
+printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
+path=""
+for a in "$@"; do
+  case "$a" in repos/*) path=$a ;; esac
+done
+case "$path" in
+  */stacks\?*) name=stacks ;;
+  */pulls\?*base=*) name=siblings ;;
+  */pulls\?*head=*)
+    head=${path#*head=}
+    head=${head%%&*}
+    name="head_$(printf '%s' "$head" | tr -c 'A-Za-z0-9' '_')"
+    ;;
+  *) echo "stub gh: unexpected call: $*" >&2; exit 99 ;;
+esac
+if [ -f "$STUB_DIR/$name.out" ]; then cat "$STUB_DIR/$name.out"; else printf '[]'; fi
+if [ -f "$STUB_DIR/$name.rc" ]; then
+  rc=$(cat "$STUB_DIR/$name.rc")
+  [ "$rc" = 0 ] || echo "gh: HTTP $rc" >&2
+  exit "$rc"
+fi
+exit 0
