@@ -228,6 +228,20 @@ If you need the turn-by-turn detail, set `show-full-output: true` on your caller
 
 **Not to be confused with** a denial whose reason is `This command requires approval` or a bare permission message. That one *is* the allowlist, and it is usually correct: `Write`, `Edit`, `git fetch`, `tar`, `node -e`, `python3 -c` and `rm` are all deliberately absent, because the checked-out pull request head is untrusted. Before widening the list, read [architecture.md → Two input defaults that look redundant and are not](architecture.md#two-input-defaults-that-look-redundant-and-are-not); a review that completed and posted findings while logging these denials is working as designed, not degraded.
 
+## Code review warns "related pull requests lookup failed"
+
+**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] related pull requests lookup failed: stack` (or `siblings`, or `base chain`). The review still runs, but it may post a finding that another pull request in the stack already fixes.
+
+**Cause:** one of the three lookups behind the related pull requests block did not answer usably — a non-2xx response, a token without the permission it needs, or output that does not parse. The failed lookup contributes no entries; the other two still do. Look at the `gh` error printed just above the warning:
+
+1. **`stack` with a 403 or 404.** The stacks API is a public preview. A 404 means the endpoint is unavailable to this repository (no stack answers `200 []`, not 404); a 403 means the job's `GITHUB_TOKEN` may not read it. Nothing to fix in the caller — the review simply runs without stack context until the API is available.
+2. **`siblings` or `base chain` with a 403.** Your caller narrowed `permissions:` below what listing pull requests needs. The documented caller grants `pull-requests: write`, which covers it — see [examples/comment-code-review.yml](../examples/comment-code-review.yml).
+3. **Any lookup with a 5xx or a timeout.** A transient GitHub error. Comment the trigger phrase again.
+
+A related warning, `related pull request #N has an unrecognised status and is not listed`, means a lookup answered but one pull request came back with a `state` other than `open` or `closed` — most likely the stacks preview API changed shape. That pull request is left out rather than labelled closed without merging; the rest of the block is unaffected. Report it so the status mapping in `Resolve review context` can be updated.
+
+**Not a cause:** a missing block on a pull request with no stack, no open pull request sharing a non-default base, and no open pull request whose head is its base. That is the expected output, and it logs no warning. See [architecture.md → Verdicts, the summary and the review context](architecture.md#verdicts-the-summary-and-the-review-context).
+
 ## Still stuck
 
 - Re-read [architecture.md](architecture.md) to check whether you're fighting the design.
