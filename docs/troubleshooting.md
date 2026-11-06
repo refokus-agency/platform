@@ -228,6 +228,29 @@ If you need the turn-by-turn detail, set `show-full-output: true` on your caller
 
 **Not to be confused with** a denial whose reason is `This command requires approval` or a bare permission message. That one *is* the allowlist, and it is usually correct: `Write`, `Edit`, `git fetch`, `tar`, `node -e`, `python3 -c` and `rm` are all deliberately absent, because the checked-out pull request head is untrusted. Before widening the list, read [architecture.md → Two input defaults that look redundant and are not](architecture.md#two-input-defaults-that-look-redundant-and-are-not); a review that completed and posted findings while logging these denials is working as designed, not degraded.
 
+## Code review warns "related pull requests lookup failed"
+
+**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] related pull requests lookup failed: stack` (or `siblings`, or `base chain`). The review still runs, but it may post a finding that another pull request in the stack already fixes.
+
+**Cause:** one of the three lookups behind the related pull requests block did not answer usably — a non-2xx response, a token without the permission it needs, or output that does not parse. The failed lookup contributes no entries; the other two still do. Look at the `gh` error printed just above the warning:
+
+1. **`stack` with a 403 or 404.** The stacks API is a public preview. A 404 means the endpoint is unavailable to this repository (no stack answers `200 []`, not 404); a 403 means the job's `GITHUB_TOKEN` may not read it. Nothing to fix in the caller — the review simply runs without stack context until the API is available.
+2. **`siblings` or `base chain` with a 403.** Your caller narrowed `permissions:` below what listing pull requests needs. The documented caller grants `pull-requests: write`, which covers it — see [examples/comment-code-review.yml](../examples/comment-code-review.yml).
+3. **Any lookup with a 5xx or a timeout.** A transient GitHub error. Comment the trigger phrase again.
+
+A related warning, `related pull request #N has an unrecognised status and is not listed`, means a lookup answered but one pull request came back with a `state` other than `open` or `closed` — most likely the stacks preview API changed shape. That pull request is left out rather than labelled closed without merging; the rest of the block is unaffected. Report it so that the status mapping in [`review-context.sh`](../.github/scripts/review-context.sh) can be updated.
+
+**Not a cause:** a missing block on a pull request with no stack, no open pull request sharing a non-default base, and no open pull request whose head is its base. That is the expected output, and it logs no warning. See [architecture.md → Verdicts, the summary and the review context](architecture.md#verdicts-the-summary-and-the-review-context).
+
+## Code review warns "the review context could not be built"
+
+**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] the review context could not be built (platform checkout: <outcome>); the review runs with the caller's prompt only.` The review runs, but without the reviewed commit and related pull requests blocks, so its summary does not name the commit and it may post a finding that another pull request already fixes.
+
+**Cause:** the step could not run [`review-context.sh`](../.github/scripts/review-context.sh), so it fell back to the caller's prompt. The outcome in the message tells you which way:
+
+1. **`platform checkout: failure`.** The `Checkout platform repo (for the context script)` step failed. Check that `platform-ref` names a ref that exists. A transient GitHub error clears when you comment the trigger phrase again.
+2. **`platform checkout: success`.** The checkout worked but the script is missing at `platform-ref`, or it exited non-zero. A ref older than the script doesn't have it. Point `platform-ref` at a ref that does. If the script failed, its own error is printed just above the warning: report it, and run `./.github/scripts/test-review-context.sh` locally to reproduce.
+
 ## Still stuck
 
 - Re-read [architecture.md](architecture.md) to check whether you're fighting the design.
