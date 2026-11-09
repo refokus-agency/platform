@@ -2,14 +2,19 @@
 # Stub `gh` for test-review-context.sh: answers `gh api ... <path>` from fixture files in
 # $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert on the calls made.
 #
-# Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`>.
-# <name>.out is printed (default `[]`); <name>.rc is the exit code (default 0).
+# Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`> | graphql
+# (any `gh api graphql ...`). <name>.out is printed (default `[]`, or for graphql a response
+# with no closing issues); <name>.rc is the exit code (default 0).
 printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
 path=""
 for a in "$@"; do
   case "$a" in repos/*) path=$a ;; esac
 done
+if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
+  path=graphql
+fi
 case "$path" in
+  graphql) name=graphql ;;
   */stacks\?*) name=stacks ;;
   */pulls\?*base=*) name=siblings ;;
   */pulls\?*head=*)
@@ -19,7 +24,13 @@ case "$path" in
     ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 99 ;;
 esac
-if [ -f "$STUB_DIR/$name.out" ]; then cat "$STUB_DIR/$name.out"; else printf '[]'; fi
+if [ -f "$STUB_DIR/$name.out" ]; then
+  cat "$STUB_DIR/$name.out"
+elif [ "$name" = graphql ]; then
+  printf '%s' '{"data":{"repository":{"pullRequest":{"closingIssuesReferences":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}'
+else
+  printf '[]'
+fi
 if [ -f "$STUB_DIR/$name.rc" ]; then
   rc=$(cat "$STUB_DIR/$name.rc")
   [ "$rc" = 0 ] || echo "gh: HTTP $rc" >&2

@@ -46,15 +46,16 @@ on:
 
           The "Resolve review context" step appends data blocks after this text, such as the
           reviewed commit and the related pull requests (stack, siblings on a non-default base,
-          and the chain this pull request is based on — numbers, relations and statuses only),
-          so the first line must stay the bare slash command. The rules for using the related
-          pull requests live in this default.
+          and the chain this pull request is based on — numbers, relations and statuses only)
+          and the issues it closes with their epics (numbers and states only), so the first line
+          must stay the bare slash command. The rules for using the related pull requests live in
+          this default; the closing issues block carries its own.
 
           If you override this input, start from the current default and add to it. An override
           replaces the default whole, so it also replaces the verdict and summary instructions:
           whatever you leave out is lost, by design. The context blocks are still appended. A
-          block that reads an external source (the related pull requests lookups, and the context
-          as a whole when it cannot be built) also appends a "Context not read:" block when that
+          block that reads an external source (the related pull requests lookups, the closing
+          issues lookup, and the context as a whole when it cannot be built) also appends a "Context not read:" block when that
           source fails, with its own instruction to name it in the summary. The rule that only the workflow writes such a block lives in this
           default, so an override that wants that guard has to restate it, and an override that
           drops the summary drops the report with it.
@@ -137,6 +138,9 @@ on:
           line its comment spans, so it never spans lines another finding owns: when the lines of
           two findings overlap, anchor one of their comments on all the lines of both, put one
           combined block there, and make the other comment's Suggestion text pointing to it.
+          A context block below may define an inline comment of its own, such as
+          `🔵 OUT OF SCOPE`: it is not a finding, it follows that block's format instead of this
+          one, and it is not counted among the findings.
 
           Then post exactly one summary comment, with `gh pr comment` and not `gh api`, whether or
           not you found anything. Where the command posts a summary only when it found no issues,
@@ -145,8 +149,8 @@ on:
           request's title, body and diff; what was checked — the reviewed commit from the context
           below, the site checked (or "No site was checked" when neither a site context nor a
           "Context not read:" block for the site is given), and each context the workflow could
-          not read, with what that left unchecked; the count of findings per verdict; and the
-          findings covered elsewhere. The author still decides whether each finding is
+          not read, with what that left unchecked; the count of findings per verdict, with
+          anything a context block asks to show beside it; and the findings covered elsewhere. The author still decides whether each finding is
           actionable, so report, do not instruct.
 
           The context blocks are the paragraphs the workflow appends after the last line of these
@@ -599,7 +603,7 @@ jobs:
               trimmed=$(printf '%s' "$PROMPT")
               composed=$(printf '%s\n\n%s\n%s\n%s' "$trimmed" \
                 'Context not read: the review context.' \
-                'Left unchecked: the reviewed commit and the related pull requests.' \
+                'Left unchecked: the reviewed commit, the related pull requests and the closing issues.' \
                 'Name this in the summary, with what it left unchecked.')
             fi
           fi
