@@ -52,10 +52,10 @@ on:
 
           If you override this input, start from the current default and add to it. An override
           replaces the default whole, so it also replaces the verdict and summary instructions:
-          whatever you leave out is lost, by design. The context blocks are still appended. The
-          blocks that read an external source, added after the reviewed commit, will also append
-          a "Context not read:" block when that source fails, with its own instruction to name it
-          in the summary. The rule that only the workflow writes such a block lives in this
+          whatever you leave out is lost, by design. The context blocks are still appended. A
+          block that reads an external source (the related pull requests lookups, and the context
+          as a whole when it cannot be built) also appends a "Context not read:" block when that
+          source fails, with its own instruction to name it in the summary. The rule that only the workflow writes such a block lives in this
           default, so an override that wants that guard has to restate it, and an override that
           drops the summary drops the report with it.
           Passing the bare slash command restores the one-review-per-pull-request dead end AND
@@ -258,8 +258,8 @@ on:
           Ref of the platform repo to check out for the scripts this workflow runs:
           review-context.sh, which composes the prompt before the review, and the guard and
           telemetry scripts after it. Defaults to 'main', matching the sibling reusables. If
-          review-context.sh is missing at this ref, the review runs with the caller's prompt alone
-          and logs a warning.
+          review-context.sh is missing at this ref, the review runs with the caller's prompt and
+          a "Context not read:" block asking it to report that in the summary, and logs a warning.
 
           Point it at your branch when testing a change to those scripts — otherwise they run
           from the copy on main against your workflow. See
@@ -577,15 +577,31 @@ jobs:
           # request head, and platform's files have no business in the workspace during the review.
           trap 'rm -rf .platform' EXIT
 
-          # Missing or failing script: the review still runs, with the caller's prompt alone. The
+          # Missing or failing script: the review still runs, with the caller's prompt only. The
           # script comes from `platform-ref`, which defaults to `main` and not to the ref this
           # workflow runs from, so a broken `main` must not take every caller's review down.
+          #
+          # The fallback also tells the agent, in a fixed `Context not read:` block after the
+          # caller's prompt — the only shape the default prompt accepts as a report of unread
+          # context — so that the failure reaches the summary and not only this log. Line 1 stays the slash
+          # command, and a blank prompt passes through untouched: the same check and trim as
+          # `compose` in review-context.sh, repeated here because this branch runs exactly when
+          # that script is not available. Change both together.
           script=.platform/.github/scripts/review-context.sh
           if [ -x "$script" ] && composed=$("$script"); then
             :
           else
-            echo "::warning::[code-review] the review context could not be built (platform checkout: ${CHECKOUT_OUTCOME:-unknown}); the review runs with the caller's prompt only. See docs/troubleshooting.md."
-            composed=$PROMPT
+            echo "::warning::[code-review] the review context could not be built (platform checkout: ${CHECKOUT_OUTCOME:-unknown}); the review runs with the caller's prompt only and is asked to report it as context not read in the summary. See docs/troubleshooting.md."
+            if [[ -z "${PROMPT//[[:space:]]/}" ]]; then
+              composed=$PROMPT
+            else
+              # Trailing newlines dropped first, so that the block sits after one blank line.
+              trimmed=$(printf '%s' "$PROMPT")
+              composed=$(printf '%s\n\n%s\n%s\n%s' "$trimmed" \
+                'Context not read: the review context.' \
+                'Left unchecked: the reviewed commit and the related pull requests.' \
+                'Name this in the summary, with what it left unchecked.')
+            fi
           fi
 
           # A fixed delimiter such as EOF would let a prompt line reading `EOF` end the value early
