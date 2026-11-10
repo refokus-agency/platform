@@ -31,6 +31,18 @@ Common failure modes when using the centralized workflows, and how to fix them.
 - If you pass `submodules: true` and a submodule points at a different private repo, configure `CHECKOUT_TOKEN`. See [secrets.md → Submodules](secrets.md#submodules).
 - If the failing step is the `.platform/` checkout specifically, confirm the `platform-ref` input points at a ref that actually exists.
 
+## Preview deploy fails at "Start GitHub deployment"
+
+**Symptoms:** the preview deploy job fails on its "Start GitHub deployment" step, before any Vercel step runs, with:
+
+```
+Could not start the GitHub deployment: Resource not accessible by integration. Preview deploys must be recorded as GitHub deployments: grant `deployments: write` in the calling workflow's `permissions:` block.
+```
+
+**Cause:** since v2, `deploy.yml` records every preview as a GitHub deployment, and the caller's `GITHUB_TOKEN` can't create one without `deployments: write`.
+
+**Fix:** add `deployments: write` to the `permissions:` block of your `pr-preview.yml`, as in [examples/pr-preview.yml](../examples/pr-preview.yml). Stage and production deploys don't fail on this: they log a ``Grant `deployments: write` to record … deploys`` warning and deploy anyway.
+
 ## "401 Unauthorized" when installing from GitHub Packages
 
 **Symptoms:** `pnpm install` / `npm ci` / `bun install` fails with `401` on a `@refokus-agency/*` package.

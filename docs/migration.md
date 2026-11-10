@@ -124,6 +124,12 @@ After merging:
 
 Don't leave a half-migrated state.
 
+## Upgrading from v1 to v2
+
+Already on the centralized workflows and moving a caller from `@v1` to `@v2`:
+
+- **`pr-preview.yml` must grant `deployments: write`.** v2's `deploy.yml` records every preview as a GitHub deployment and fails the preview deploy, before the build, when it can't. Add the line to the caller's `permissions:` block, as in [`examples/pr-preview.yml`](../examples/pr-preview.yml). Stage and production callers need no change: without the permission they still deploy and only log a warning.
+
 ## Migration order recommendation
 
 Start with the lowest-risk repos to build confidence:

@@ -23,6 +23,9 @@ permissions:
   contents: read
   packages: read
   pull-requests: write
+  # Required: deploy.yml records each preview as a GitHub deployment and
+  # fails the preview deploy without this.
+  deployments: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

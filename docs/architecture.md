@@ -38,6 +38,22 @@ Deploys to Vercel at a specific environment (`preview`, `stage`, or `production`
 
 When the triggering event is `pull_request` (i.e. a `pr-preview.yml`-style caller), the job also upserts a single sticky comment on the PR with the deployed URL — found via a hidden HTML marker and updated in place on subsequent pushes, rather than piling up one comment per commit. This requires the caller to grant `pull-requests: write`; callers triggered by `push` (stage/production) never hit this step, so they don't need the extra permission.
 
+Every deploy is also recorded as a **GitHub deployment**, with the same lifecycle in all three environments (`.github/scripts/github-deployment.cjs`):
+
+1. **Start** — right after the platform checkout, before anything touches Vercel, the job creates a deployment and posts `in_progress`. Preview deployments use the PR head SHA as `ref` (`github.sha` is the merge commit on `pull_request`) and `transient_environment: true`; stage and production use `github.ref_name`, as before.
+2. **Finish** — the last step runs under `always()` and posts `success` with the Vercel root URL as `environment_url` when `vercel deploy` succeeded (and, for stage, the stage alias too), or `failure` with no URL when the deploy failed, was skipped by an earlier failure, or the run was cancelled before it. The state follows the deploy, not `job.status`: a failed PR comment after a good deploy fails the job but still records `success`, because the preview is live. A failure never marks earlier deployments inactive, so the last good deploy stays active. A preview success doesn't either, because every PR's preview shares the `preview` environment.
+
+This is what lets a later job find the preview for a commit: `GET /repos/{owner}/{repo}/deployments?environment=preview&sha=<head>`.
+
+Recording a deployment needs the caller to grant `deployments: write`, and the rule depends on the environment:
+
+- **preview: required.** Without it the start step fails, naming the permission, and the build never runs. This is a breaking change shipped in v2; see [migration.md](migration.md#upgrading-from-v1-to-v2).
+- **stage / production: opt-in.** Without it the job logs a warning, skips the finish step, and deploys anyway, the same as in v1.
+
+The job still declares no `permissions:` block, on purpose: a declared `deployments: write` would make every caller grant it or fail at startup, stage and production included.
+
+`.github/scripts/record-github-deployment.cjs`, the v1 recorder (stage/production, success only), is no longer called by `deploy.yml` but stays in the repo: `platform-ref` defaults to `main`, so `deploy.yml@v1` loads its scripts from `main`, and deleting it there would break every v1 stage and production deploy.
+
 ### Reusable workflow: `release.yml`
 
 Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing. The publish target is selected by the `registry` input:
