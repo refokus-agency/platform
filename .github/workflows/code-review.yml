@@ -344,7 +344,7 @@ on:
           Defaults to the caller's SITE_URL_TEMPLATE Actions variable. Empty or `none` means no site:
           the review reads only the code, as before #122, but like every review it still carries
           the performance note. `none` lets a repository opt out of an organization-level
-          variable: set a repository variable of the same name to `none`.
+          variable: set a repository variable of the same name, or this input, to `none`.
 
           With a template, the review finds the preview deployment pr-preview recorded for the
           head commit, waits up to 5 minutes while it deploys, and opens the site with a

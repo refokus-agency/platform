@@ -177,7 +177,7 @@ stop_with_comment() {
       ;;
     missing)
       title='no preview deployment for this commit'
-      text="There is no preview deployment of ${HEAD_SHA}. Either the deploy has not started yet (\`pr-preview\` deploys only after CI passes, so a pull request whose CI is still running or failed has none), the deployment was deleted, \`pr-preview\` skipped this pull request (for example a Dependabot one), or the repository has no preview deploy. Comment \`${TRIGGER_PHRASE}\` again once the preview is deployed, or set the repository variable \`SITE_URL_TEMPLATE\` to \`none\` if this repository has no site to check."
+      text="There is no preview deployment of ${HEAD_SHA}. Either the deploy has not started yet (\`pr-preview\` deploys only after CI passes, so a pull request whose CI is still running or failed has none), the deployment was deleted, \`pr-preview\` skipped this pull request (for example a Dependabot one), or the repository has no preview deploy. Comment \`${TRIGGER_PHRASE}\` again once the preview is deployed, or, if this repository has no site to check, set the \`SITE_URL_TEMPLATE\` variable or the caller's \`site-url-template\` input to \`none\`."
       ;;
     failed)
       title='the preview deploy failed'
@@ -198,7 +198,7 @@ stop_with_comment() {
       ;;
     invalid-template)
       title='`SITE_URL_TEMPLATE` is invalid'
-      text="The repository variable has to start with \`https://\` and a host, contain \`{preview_url}\` after the host (in the path, query or fragment), and use only URL characters: no space, quote or backtick. Fix it in the repository's Actions variables and comment \`${TRIGGER_PHRASE}\` again."
+      text="The template has to start with \`https://\` and a host, contain \`{preview_url}\` after the host (in the path, query or fragment), and use only URL characters: no space, quote or backtick. Fix it where it is set (the \`SITE_URL_TEMPLATE\` variable or the caller's \`site-url-template\` input) and comment \`${TRIGGER_PHRASE}\` again."
       ;;
     invalid-url)
       title='the preview deployment URL is not a Vercel URL'

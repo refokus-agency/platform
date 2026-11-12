@@ -160,11 +160,14 @@ case_none_template() { # `none` opts out (of an org-level variable): no site, no
     expect_out status none
     [ ! -s "$STUB_DIR/calls.log" ]; check $? "the step makes no gh call for '$v'"
   done
-  # The stop comment for a missing deployment names the opt-out.
+  # The stop comment for a missing deployment names the opt-out, through the variable or the
+  # caller's input, since a caller can pass the template either way.
   setup
   run_script
   expect_stop missing
   body_has 'to `none`'
+  body_has '`SITE_URL_TEMPLATE` variable'
+  body_has '`site-url-template` input'
 }
 
 case_jq_status() { # a jq that exits 2 or 3 is an unreadable answer (error), never a refusal
