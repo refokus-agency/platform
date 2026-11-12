@@ -47,9 +47,11 @@ on:
           The "Resolve review context" step appends data blocks after this text, such as the
           reviewed commit and the related pull requests (stack, siblings on a non-default base,
           and the chain this pull request is based on — numbers, relations and statuses only)
-          and the issues it closes with their epics (numbers and states only), so the first line
-          must stay the bare slash command. The rules for using the related pull requests live in
-          this default; the closing issues block carries its own.
+          and the issues it closes with their epics (numbers and states only), then a fixed
+          performance block on every review and, when `site-url-template` gives one, the preview
+          site to check in a browser, so the first line must stay the bare slash command. The rules
+          for using the related pull requests live in this default; the closing issues, performance
+          and site blocks carry their own.
 
           If you override this input, start from the current default and add to it. An override
           replaces the default whole, so it also replaces the verdict and summary instructions:
@@ -227,6 +229,12 @@ on:
           Keep any addition read-only — the checked-out pull request head is untrusted, so no
           `Write`, no `Edit`, no general `Bash(...)` entry. Full argument and the run-level evidence
           in docs/architecture.md#two-input-defaults-that-look-redundant-and-are-not.
+
+          With `site-url-template` set, the workflow appends eleven Playwright browser tools to this
+          list for that run, and only then (an empty list gets just those). They are a reasoned
+          exception to the read-only rule: none runs code in the page or on the runner, or uploads
+          a file. Do not add browser tools here; see
+          docs/architecture.md#the-preview-site-and-the-performance-note.
         required: false
         type: string
         default: mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Read,Glob,Grep,Task,Agent,TodoWrite,Skill,SlashCommand
@@ -260,10 +268,13 @@ on:
       platform-ref:
         description: |
           Ref of the platform repo to check out for the scripts this workflow runs:
-          review-context.sh, which composes the prompt before the review, and the guard and
-          telemetry scripts after it. Defaults to 'main', matching the sibling reusables. If
-          review-context.sh is missing at this ref, the review runs with the caller's prompt and
-          a "Context not read:" block asking it to report that in the summary, and logs a warning.
+          resolve-preview-site.sh and review-context.sh, which resolve the preview site and
+          compose the prompt before the review, and the guard and telemetry scripts after it.
+          Defaults to 'main', matching the sibling reusables. If review-context.sh is missing at
+          this ref, the review runs with the caller's prompt and a "Context not read:" block
+          asking it to report that in the summary, and logs a warning. If the repository sets
+          SITE_URL_TEMPLATE and resolve-preview-site.sh is missing at this ref (or the checkout
+          fails), the review does not run: the pull request gets a comment and the job fails.
 
           Point it at your branch when testing a change to those scripts — otherwise they run
           from the copy on main against your workflow. See
@@ -326,6 +337,24 @@ on:
         required: false
         type: string
         default: ${{ vars.ANTHROPIC_ORG_ID }}
+      site-url-template:
+        description: |
+          URL of the site to check in a browser, with `{preview_url}` where the pull request's
+          Vercel preview URL goes, e.g. `https://stage.example.com/?preview={preview_url}`.
+          Defaults to the caller's SITE_URL_TEMPLATE Actions variable. Empty or `none` means no site:
+          the review reads only the code, as before #122, but like every review it still carries
+          the performance note. `none` lets a repository opt out of an organization-level
+          variable: set a repository variable of the same name to `none`.
+
+          With a template, the review finds the preview deployment pr-preview recorded for the
+          head commit, waits up to 5 minutes while it deploys, and opens the site with a
+          fixed list of read-only browser tools. When the preview is not usable (still deploying,
+          missing, failed, unreadable, or an invalid template or URL) the review does not run: the
+          pull request gets a comment saying why and the job fails. The caller must then grant
+          `deployments: read`. See docs/architecture.md#the-preview-site-and-the-performance-note.
+        required: false
+        type: string
+        default: ${{ vars.SITE_URL_TEMPLATE }}
     secrets:
       # required: false on purpose. A required secret would fail the run at startup for every
       # caller that hasn't configured it. The "Resolve auth" step below gates on the credential
@@ -384,8 +413,8 @@ jobs:
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here would force EVERY caller to
     # grant it or the run fails at startup. Callers need `contents: read`,
-    # `pull-requests: write`, `issues: write` and `id-token: write`;
-    # see examples/comment-code-review.yml.
+    # `pull-requests: write`, `issues: write` and `id-token: write`, plus
+    # `deployments: read` when they set SITE_URL_TEMPLATE; see examples/comment-code-review.yml.
     #
     # Job level, not on the review step — the action's own env block shadows a step-level value.
     env:
@@ -537,6 +566,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         shell: bash
 
+      - name: Acknowledge request
+        if: steps.pr.outputs.eligible == 'true'
+        # Best-effort 👀 acknowledgement — the only feedback a comment trigger gets while the
+        # review runs. See docs/architecture.md#four-gates-all-skipping-green. Before "Resolve
+        # preview site", so it shows while that step waits for a preview still deploying.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api --silent \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes || echo "::notice::[code-review] could not add the eyes reaction (issues: write not granted). Continuing."
+        shell: bash
+
       - name: Checkout platform repo (for the context script)
         # The first of this reusable's two platform checkouts, and the only one before the review:
         # "Resolve review context" runs a script out of it, and "Resolve review context" deletes it
@@ -559,9 +602,98 @@ jobs:
           # checkout with a token in its environment, and nothing here pushes.
           persist-credentials: false
 
+      - name: Resolve preview site
+        id: site
+        if: steps.pr.outputs.eligible == 'true'
+        # The preview site the review checks, resolved by .github/scripts/resolve-preview-site.sh
+        # (which documents its outputs and is tested by test-resolve-preview-site.sh). Before
+        # "Resolve review context", which deletes .platform on exit.
+        #
+        # No template (empty or `none`): status=none and the review runs without a site, whatever
+        # the checkout did. With
+        # one, a preview that is not usable stops the review: the script comments on the pull
+        # request why and exits 1, and every later step is gated on `status != 'stop'` (the
+        # `always()` ones also on this step succeeding: an exit that wrote no status fails it, and
+        # a run cancelled during the wait for the preview leaves it `cancelled` with no status,
+        # which must not reach the guard as a review that ended `skipped`). A
+        # template with no script to resolve it (a failed checkout, or a `platform-ref` older
+        # than the script) stops it the same way, because a review without the configured site
+        # would look complete and not be.
+        #
+        # Every value arrives through `env:` and is never interpolated into the script.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_URL_TEMPLATE: ${{ inputs.site-url-template }}
+          HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TRIGGER_PHRASE: ${{ inputs.trigger-phrase }}
+          CHECKOUT_OUTCOME: ${{ steps.context-checkout.outcome }}
+        run: |
+          # Whitespace only counts as empty, and `none` as no site, as in resolve-preview-site.sh.
+          template=${SITE_URL_TEMPLATE//[[:space:]]/}
+          if [ -z "$template" ] || [ "$template" = none ]; then
+            echo "status=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          script=.platform/.github/scripts/resolve-preview-site.sh
+          if [ ! -x "$script" ]; then
+            {
+              echo "status=stop"
+              echo "stop-reason=error"
+            } >> "$GITHUB_OUTPUT"
+            echo "::error::[code-review] preview site: error. resolve-preview-site.sh is missing (platform checkout: ${CHECKOUT_OUTCOME:-unknown}); the review did not run. See docs/troubleshooting.md."
+            run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            body="**Code review not run: the preview site could not be resolved.**
+
+          This repository sets \`SITE_URL_TEMPLATE\`, so the review checks the preview site of the pull request, and the script that finds it could not be loaded. Comment the trigger phrase again, and report it if it happens again.
+
+          Run log: ${run_url}"
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body" \
+              || echo "::error::[code-review] could not comment on pull request #${PR_NUMBER}."
+            exit 1
+          fi
+          "$script"
+        shell: bash
+
+      - name: Install Playwright MCP
+        # The browser for the preview site, only when there is one. Chrome is preinstalled on
+        # ubuntu-latest (/usr/bin/google-chrome); the MCP server is not, and it goes under
+        # $RUNNER_TEMP, never into the workspace the review reads.
+        #
+        # `npm ci` from .github/scripts/playwright-mcp/package-lock.json, which the site step
+        # copied to $RUNNER_TEMP/pwmcp: every package, the transitive Playwright alpha included,
+        # at an exact version and integrity hash. Dependabot's npm entry bumps it (Pin check does
+        # not cover it); review each bump as docs/architecture.md#the-preview-site-and-the-performance-note says. Its
+        # packages declare no install scripts, so --ignore-scripts costs nothing.
+        #
+        # A failed install stops the review, like an unusable preview: the repository set
+        # `SITE_URL_TEMPLATE`, and a review that was told to check a site with no browser to do it
+        # would look complete and not be. The step comments on the pull request why and exits 1;
+        # every later step is gated on its outcome (`success`, or `skipped` when there is no site).
+        id: pwmcp
+        if: steps.site.outputs.status == 'ready'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if npm ci --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/pwmcp"; then
+            exit 0
+          fi
+          echo "::error::[code-review] preview site: the Playwright MCP could not be installed; the review did not run. See docs/troubleshooting.md."
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="**Code review not run: the browser for the preview site could not be installed.**
+
+          This repository sets \`SITE_URL_TEMPLATE\`, so the review checks the preview site of the pull request, and installing the browser it uses failed. Comment the trigger phrase again, and report it if it happens again.
+
+          Run log: ${run_url}"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body" \
+            || echo "::error::[code-review] could not comment on pull request #${PR_NUMBER}."
+          exit 1
+        shell: bash
+
       - name: Resolve review context
         id: context
-        if: steps.pr.outputs.eligible == 'true'
+        if: steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop'
         # The caller's prompt plus the context blocks, composed by
         # .github/scripts/review-context.sh — which documents the blocks and is tested by
         # .github/scripts/test-review-context.sh.
@@ -576,6 +708,9 @@ jobs:
           BASE_REF: ${{ steps.pr.outputs.base-ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           CHECKOUT_OUTCOME: ${{ steps.context-checkout.outcome }}
+          SITE_STATUS: ${{ steps.site.outputs.status }}
+          SITE_URL: ${{ steps.site.outputs.site-url }}
+          SITE_VITALS_TAG: ${{ steps.site.outputs.vitals-tag }}
         run: |
           # Gone before this step ends, whatever happens in it: the next checkout is the pull
           # request head, and platform's files have no business in the workspace during the review.
@@ -601,10 +736,26 @@ jobs:
             else
               # Trailing newlines dropped first, so that the block sits after one blank line.
               trimmed=$(printf '%s' "$PROMPT")
-              composed=$(printf '%s\n\n%s\n%s\n%s' "$trimmed" \
+              # The preview site is named only when "Resolve preview site" found one: a repo
+              # without SITE_URL_TEMPLATE never had a site to leave unchecked, and keeps the
+              # sentence it had before #122.
+              # The URL is named when it has the shape resolve-preview-site.sh already checked
+              # (https, URL characters only), so the summary can still say which site was left
+              # unchecked.
+              if [ "$SITE_STATUS" = ready ] && [[ "$SITE_URL" =~ ^https://[A-Za-z0-9._~:/?#@!\$\&()*+,\;=%{}-]+$ ]]; then
+                left="Left unchecked: the reviewed commit, the related pull requests, the closing issues and the preview site ${SITE_URL}."
+              elif [ "$SITE_STATUS" = ready ]; then
+                left='Left unchecked: the reviewed commit, the related pull requests, the closing issues and the preview site.'
+              else
+                left='Left unchecked: the reviewed commit, the related pull requests and the closing issues.'
+              fi
+              # The performance block is the same fixed text as block_performance in
+              # review-context.sh, kept here because it is on every review: change both.
+              composed=$(printf '%s\n\n%s\n%s\n%s\n\n%s' "$trimmed" \
                 'Context not read: the review context.' \
-                'Left unchecked: the reviewed commit, the related pull requests and the closing issues.' \
-                'Name this in the summary, with what it left unchecked.')
+                "$left" \
+                'Name this in the summary, with what it left unchecked.' \
+                'Performance: take Core Web Vitals into account in this review, as findings with a verdict like any other. Infer LCP (largest contentful paint), CLS (cumulative layout shift) and INP (interaction to next paint) from the code: what loads, blocks rendering, shifts the layout or runs on interaction. When a site block is given below, corroborate them in the preview, and a finding the page confirms is CONFIRMED. When the code is not a site (a package, server code), weigh performance in general instead: work on hot paths, bundle size, blocking calls.')
             fi
           fi
 
@@ -617,23 +768,21 @@ jobs:
             printf '%s\n' "$composed"
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
-        shell: bash
 
-      - name: Acknowledge request
-        if: steps.pr.outputs.eligible == 'true'
-        # Best-effort 👀 acknowledgement — the only feedback a comment trigger gets while the
-        # review runs. See docs/architecture.md#four-gates-all-skipping-green.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-        run: |
-          gh api --silent \
-            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}/reactions" \
-            -f content=eyes || echo "::notice::[code-review] could not add the eyes reaction (issues: write not granted). Continuing."
+          # The browser is started only when the prompt tells the agent which site to check: the
+          # site block is the last block, so its last line closes the prompt. With no block (the
+          # fallback above, a blank prompt, or a block the script dropped on a bad URL or tag) the
+          # review runs without the browser instead of with a browser and no instructions.
+          last_line=$(printf '%s' "$composed" | tail -n 1)
+          if [ "$SITE_STATUS" = ready ] && [ "$last_line" = "Name ${SITE_URL} in the summary as the site checked." ]; then
+            echo "site-checked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "site-checked=false" >> "$GITHUB_OUTPUT"
+          fi
         shell: bash
 
       - name: Checkout pull request head
-        if: steps.pr.outputs.eligible == 'true'
+        if: steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Same-repo head only — see the fork gate in "Resolve pull request".
@@ -652,7 +801,7 @@ jobs:
 
       - name: Code review
         id: review
-        if: steps.pr.outputs.eligible == 'true'
+        if: steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop'
         # Pinned literally: GitHub allows no expression in a step's `uses:`, so the ref cannot
         # be exposed as a workflow input. Do not hand-edit the SHA — Dependabot's weekly
         # github-actions run bumps it and its version comment together, and the pin-check
@@ -670,9 +819,16 @@ jobs:
           anthropic_federation_rule_id: ${{ inputs.federation-rule-id }}
           anthropic_organization_id: ${{ inputs.anthropic-org-id }}
           allowed_bots: ${{ inputs.allowed-bots }}
-          # v1 has neither an `allowed_tools` nor a `model` input — both reach the CLI here.
+          # v1 has neither an `allowed_tools` nor a `model` input — both reach the CLI here. With a
+          # site the prompt names (`site-checked`, from "Resolve review context"), the browser tools
+          # from "Resolve preview site" and the Playwright MCP server are added; without one,
+          # neither is, so the agent never gets a browser without being told which site to check.
+          # The browser tools reach --allowedTools even when `allowed-tools` is empty, so a started
+          # server never has all its tools denied. The MCP config is inline JSON, never a file
+          # path: the action merges an inline --mcp-config with its own servers, while a path
+          # replaces them and drops mcp__github_inline_comment__create_inline_comment.
           claude_args: >-
-            ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ inputs.allowed-tools != '' && format('--allowedTools "{0}"', inputs.allowed-tools) || '' }}
+            ${{ inputs.model != '' && format('--model "{0}" ', inputs.model) || '' }}${{ (inputs.allowed-tools != '' || steps.context.outputs.site-checked == 'true') && format('--allowedTools "{0}{1}{2}"', inputs.allowed-tools, (inputs.allowed-tools != '' && steps.context.outputs.site-checked == 'true') && ',' || '', steps.context.outputs.site-checked == 'true' && steps.site.outputs.browser-tools || '') || '' }}${{ steps.context.outputs.site-checked == 'true' && format(' --mcp-config ''{0}''', steps.site.outputs.mcp-config) || '' }}
 
       - name: Checkout platform repo (for the guard script)
         # The second of this reusable's two platform checkouts; the first, for the context script,
@@ -687,7 +843,7 @@ jobs:
         # to its default of `${{ github.token }}` and authenticates the fetch. That is worth
         # keeping — an authenticated fetch does not share the runner IP's unauthenticated rate
         # limit — but it means the credential has to be kept off disk explicitly.
-        if: always() && steps.pr.outputs.eligible == 'true'
+        if: always() && steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop' && steps.site.outcome == 'success' && (steps.pwmcp.outcome == 'success' || steps.pwmcp.outcome == 'skipped')
         id: guard-checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -708,7 +864,7 @@ jobs:
         #
         # This runs AFTER the review and can never block it. Worst case is a red advisory job
         # carrying an explanation — not a review that did not happen.
-        if: always() && steps.pr.outputs.eligible == 'true'
+        if: always() && steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop' && steps.site.outcome == 'success' && (steps.pwmcp.outcome == 'success' || steps.pwmcp.outcome == 'skipped')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
@@ -737,7 +893,7 @@ jobs:
         # brace. Telemetry is additive information, never a verdict, and `@v1` is force-moved
         # onto every consumer repo in the org, so no bug in here may ever redden a caller's CI.
         # The guard step above deliberately does NOT carry this; don't copy it upward.
-        if: always() && steps.pr.outputs.eligible == 'true'
+        if: always() && steps.pr.outputs.eligible == 'true' && steps.site.outputs.status != 'stop' && steps.site.outcome == 'success' && (steps.pwmcp.outcome == 'success' || steps.pwmcp.outcome == 'skipped')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

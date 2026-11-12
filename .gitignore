@@ -5,3 +5,6 @@
 
 # Agent skill-registry cache (kael/gentle-ai tooling, machine-local)
 .atl/
+
+# Playwright MCP install for local runs of code-review.yml (package.json + lockfile are committed)
+.github/scripts/playwright-mcp/node_modules/
