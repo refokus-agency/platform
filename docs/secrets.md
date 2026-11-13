@@ -111,6 +111,7 @@ permissions:
   pull-requests: write
   issues: write     # for the 👀 acknowledgement on the triggering comment
   id-token: write   # mandatory — the run just fails without it
+  # deployments: read   # only when the repo sets SITE_URL_TEMPLATE, see below
 
 jobs:
   code-review:
@@ -225,6 +226,20 @@ Three things worth knowing before you enable this:
 - **`id-token: write` is mandatory in the caller**, on every path — not just federation. The action exchanges the workflow's GitHub OIDC token for a GitHub App token. The reusable cannot detect the omission from the inside; the run just fails. `examples/comment-code-review.yml` grants it.
 - **The API key belongs to the caller, and so does the bill.** A reusable workflow runs in the caller's context with the caller's secrets, so each repo (and each external consumer) pays for its own reviews. The review fans out several parallel agents per run, and cost scales with how often it runs, not with repo count. That is the whole reason the trigger is a comment and not `pull_request` or `push`: every run is one a human asked for. The `model` and `opus-model` inputs set what those agents run on — the defaults keep the whole fan-out on Sonnet, including the steps the review command asks for Opus by name. See [architecture.md](architecture.md#how-the-review-models-are-chosen).
 - **External consumers should pass secrets explicitly rather than `secrets: inherit`.** The reasoning, the per-reusable tables and the complete caller shape for this workflow — one key plus the `permissions:` block above — live in [Calling from outside `refokus-agency`](#calling-from-outside-refokus-agency). That section is the single copy; this bullet deliberately does not repeat it.
+
+### `SITE_URL_TEMPLATE` for the preview site review
+
+Not a secret: an Actions **variable**, set per repository (or at org level for a shared pattern), that `code-review.yml`'s `site-url-template` input defaults to. When it is set, the review opens the pull request's Vercel preview in a headless browser — see [architecture.md → The preview site and the performance note](architecture.md#the-preview-site-and-the-performance-note). The value is a URL with a `{preview_url}` placeholder, which the workflow fills with the preview deployment's `https://<name>.vercel.app` URL:
+
+```text
+https://wiza-stage.webflow.io/?preview={preview_url}
+```
+
+It must start with `https://` and a host, contain `{preview_url}` after that host — in the path, query or fragment, never as the host itself, since the value is a whole `https://…` URL — and use only URL characters (`A-Z a-z 0-9 . _ ~ : / ? # @ ! $ & ( ) * + , ; = % { } -`). Leave it unset and the review runs without a site; it still carries the performance note every review gets. To opt one repository out of an org-level `SITE_URL_TEMPLATE`, set a repository variable of the same name to `none`: a repository variable overrides the organization's, and GitHub does not accept an empty one. A caller can do the same with `with: site-url-template: none`.
+
+Set it only for a site whose content the team controls. The review agent reads whatever the page renders, including CMS entries, third-party embeds and anything the site's users can submit, and a page can try to prompt-inject it: see [architecture.md → The preview site and the performance note](architecture.md#the-preview-site-and-the-performance-note).
+
+Setting it adds one **permission**, not a secret: the caller has to grant `deployments: read`, as [`examples/comment-code-review.yml`](../examples/comment-code-review.yml) does, because the workflow reads the deployments `deploy.yml` records. `GITHUB_TOKEN` is enough once it is granted. Without it the review stops with a comment asking for it.
 
 ## Creating the Vercel secrets
 

@@ -1,3 +1,7 @@
+// v1 ONLY — do not delete or change. deploy.yml no longer calls this script
+// (v2 uses github-deployment.cjs), but `platform-ref` defaults to `main`, so
+// every `deploy.yml@v1` caller still loads it from platform `main`.
+//
 // Records a GitHub Deployment so the repo's Environments/Deployments
 // view reflects real deploys instead of stale records from a
 // disconnected Vercel Git integration. Requires the caller to grant

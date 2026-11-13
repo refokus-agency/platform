@@ -31,6 +31,18 @@ Common failure modes when using the centralized workflows, and how to fix them.
 - If you pass `submodules: true` and a submodule points at a different private repo, configure `CHECKOUT_TOKEN`. See [secrets.md → Submodules](secrets.md#submodules).
 - If the failing step is the `.platform/` checkout specifically, confirm the `platform-ref` input points at a ref that actually exists.
 
+## Preview deploy fails at "Start GitHub deployment"
+
+**Symptoms:** the preview deploy job fails on its "Start GitHub deployment" step, before any Vercel step runs, with:
+
+```
+Could not start the GitHub deployment: Resource not accessible by integration. Preview deploys must be recorded as GitHub deployments: grant `deployments: write` in the calling workflow's `permissions:` block.
+```
+
+**Cause:** since v2, `deploy.yml` records every preview as a GitHub deployment, and the caller's `GITHUB_TOKEN` can't create one without `deployments: write`.
+
+**Fix:** add `deployments: write` to the `permissions:` block of your `pr-preview.yml`, as in [examples/pr-preview.yml](../examples/pr-preview.yml). Stage and production deploys don't fail on this: they log a ``Grant `deployments: write` to record … deploys`` warning and deploy anyway.
+
 ## "401 Unauthorized" when installing from GitHub Packages
 
 **Symptoms:** `pnpm install` / `npm ci` / `bun install` fails with `401` on a `@refokus-agency/*` package.
@@ -244,14 +256,52 @@ A related warning, `related pull request #N has an unrecognised status and is no
 
 **Not a cause:** a missing block on a pull request with no stack, no open pull request sharing a non-default base, and no open pull request whose head is its base. That is the expected output, and it logs no warning and adds no `Context not read:` block. See [architecture.md → Verdicts, the summary and the review context](architecture.md#verdicts-the-summary-and-the-review-context).
 
+## Code review warns "closing issues lookup failed"
+
+**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] closing issues lookup failed: closing issues` (or `epics`). The review still runs. With `closing issues`, the prompt has no closing issues block, only `Context not read: the closing issues lookup.`: the review does not check the acceptance criteria of the issues the pull request closes, nor whether its changes belong to other sub-issues of their epics. With `epics`, the closing issues are listed without their epics or candidate sub-issues, and `Context not read: the epic lookup.` says scope creep was not checked. Either block asks the review to name it in the summary comment.
+
+**Cause:** the GraphQL query behind the block did not answer usably, or it counted more closing issues (`totalCount`) than it returned. Look at the `gh` error printed just above the warning:
+
+1. **A 401 or 403, or `Resource not accessible by integration`.** Your caller narrowed `permissions:` below what reading issues needs. The documented caller grants `issues: write` and `pull-requests: write`, which cover it — see [examples/comment-code-review.yml](../examples/comment-code-review.yml).
+2. **`epics` only.** An epic or a sub-issue list could not be read (an error, or a sub-issue list returned as `null` instead of a list), for example in a repository the job's token cannot see. The closing issues are still judged; only the scope check is missing, and the review is told not to label any change out of scope. If GitHub hides such an epic without an error, there is no warning at all and the closing issue is listed with no epic.
+3. **A 5xx or a timeout.** A transient GitHub error. Comment the trigger phrase again.
+
+A related warning, `closing issues lookup returned an entry that is not valid (<kind>)`, means one issue came back with a repository name, number or state the script does not accept. That entry is left out and the rest are still listed, but the omission is reported to the review: a closing issue left out adds `Context not read: the closing issues lookup.`, and an epic or sub-issue left out adds `Context not read: the epic lookup.`. If every closing issue is left out, the unread block replaces the listing, as for a failed lookup. Report it so that [`review-context.sh`](../.github/scripts/review-context.sh) can be updated.
+
+**Not a cause:** no block on a pull request that closes no issue. That is the expected output, with no warning and no `Context not read:` block. On a stacked pull request (any base but the default branch) GitHub ignores `Closes #N` in the body, so the block is missing until the issue is linked by hand in the pull request's Development sidebar. See [architecture.md → Verdicts, the summary and the review context](architecture.md#verdicts-the-summary-and-the-review-context).
+
 ## Code review warns "the review context could not be built"
 
-**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] the review context could not be built (platform checkout: <outcome>); the review runs with the caller's prompt only and is asked to report it as context not read in the summary.` The review runs, but without the reviewed commit and related pull requests blocks, so its summary does not name the commit and it may post a finding that another pull request already fixes. The step appends a fixed block after the caller's prompt — `Context not read: the review context.`, `Left unchecked: the reviewed commit and the related pull requests.` and the instruction to name it in the summary — so the summary comment says it too (unless the prompt is blank, which passes through untouched). The block is appended to an overridden `prompt` as well; whether the summary then mentions it depends on that prompt.
+**Symptoms:** the `Resolve review context` step logs `::warning::[code-review] the review context could not be built (platform checkout: <outcome>); the review runs with the caller's prompt only and is asked to report it as context not read in the summary.` The review runs, but without the reviewed commit, related pull requests, closing issues and site blocks, so its summary does not name the commit, it may post a finding that another pull request already fixes, it does not check the closing issues' acceptance criteria or scope, and, when the repository sets `SITE_URL_TEMPLATE`, it is not pointed at the preview site. The step appends a fixed block after the caller's prompt — `Context not read: the review context.`, `Left unchecked: the reviewed commit, the related pull requests and the closing issues.` (with `and the preview site <URL>` at the end when the `Resolve preview site` step found one; the browser is then left off, because nothing tells the review which site to check) and the instruction to name it in the summary — followed by the same performance block as always, so the summary comment says it too (unless the prompt is blank, which passes through untouched). The block is appended to an overridden `prompt` as well; whether the summary then mentions it depends on that prompt.
 
 **Cause:** the step could not run [`review-context.sh`](../.github/scripts/review-context.sh), so it fell back to the caller's prompt. The outcome in the message tells you which way:
 
 1. **`platform checkout: failure`.** The `Checkout platform repo (for the context script)` step failed. Check that `platform-ref` names a ref that exists. A transient GitHub error clears when you comment the trigger phrase again.
 2. **`platform checkout: success`.** The checkout worked but the script is missing at `platform-ref`, or it exited non-zero. A ref older than the script doesn't have it. Point `platform-ref` at a ref that does. If the script failed, its own error is printed just above the warning: report it, and run `./.github/scripts/test-review-context.sh` locally to reproduce.
+
+## Code review stopped: "Code review not run" on a repository with `SITE_URL_TEMPLATE`
+
+**Symptoms:** instead of a review, the pull request gets a comment that starts with **Code review not run**, the `Resolve preview site` step (for reason 8, `Install Playwright MCP`) logs `::error::[code-review] preview site: <reason>`, and the job is red. This only happens when the repository sets `SITE_URL_TEMPLATE`: with a site configured, a review without it would look complete and not be, so it does not run. The reason in the log is one of:
+
+1. **`pending-timeout` — "the preview is still deploying".** The newest preview deployment for the head commit was still `queued`, `pending` or `in_progress` after 5 minutes. Wait for the `pr-preview` run to finish and comment the trigger phrase again.
+2. **`missing` — "no preview deployment for this commit".** There is no `preview` deployment for the head commit. Either the `pr-preview` run has not started its deploy yet (comment again once it has), or it never will for this commit: `pr-preview.yml` deploys only after CI passes (`needs: ci`), so a pull request whose CI is still running or failed has no preview (fix CI, or wait for it, then comment again), `pr-preview` skips this pull request (Dependabot pull requests are skipped by design, see [dependabot.md](dependabot.md)), or the repository has no `pr-preview.yml` on v2, which records the deployment (see [migration.md → Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2)). The same stop follows a 404 on the statuses of a deployment that was listed a moment earlier: it was deleted in the meantime. If the repository should not review a site, unset `SITE_URL_TEMPLATE`, or, when it comes from the organization, set a repository variable `SITE_URL_TEMPLATE` to `none`; a caller that passes the template through its `site-url-template` input sets that input to `none` instead (see [secrets.md → `SITE_URL_TEMPLATE`](secrets.md#site_url_template-for-the-preview-site-review)).
+3. **`failed` — "the preview deploy failed".** The newest status is `failure`, `error` or `inactive`, or `success` without a URL. The comment links the deploy's log: fix the deploy, push, and comment again.
+4. **`unreadable` — "the deployments could not be read".** The GitHub API answered 403 or 404 to the deployment list, or 403 to a deployment's statuses: `comment-code-review.yml` does not grant `deployments: read`. A rate-limited 403 is retried and ends as `error` instead, never here. Add it to its `permissions:` block, as in [examples/comment-code-review.yml](../examples/comment-code-review.yml).
+5. **`invalid-template` — "`SITE_URL_TEMPLATE` is invalid".** The variable has no `{preview_url}` after the host (`https://{preview_url}` is rejected: the placeholder is a whole URL, so it goes in the path, query or fragment), does not start with `https://` and a host, or holds a character that is not a URL character (a space, a quote, a backtick). Fix it where it is set, the `SITE_URL_TEMPLATE` Actions variable or the caller's `site-url-template` input; see [secrets.md](secrets.md#site_url_template-for-the-preview-site-review).
+6. **`invalid-url` — "the preview deployment URL is not a Vercel URL".** The deployment's `environment_url` is not `https://<name>.vercel.app`, so it is not opened. Check the URL in the Deployments page of the repository: something other than `deploy.yml` may be recording `preview` deployments.
+7. **`error` — "the preview site could not be resolved".** An unexpected failure: a GitHub error other than 403 or 404 (or a rate limit) that lasted through three tries 5 seconds apart, an answer the script could not read, or `resolve-preview-site.sh` missing at `platform-ref` (a ref older than the script). The error is printed just above the `::error::` line. A transient GitHub error clears when you comment again; otherwise report it, and run `./.github/scripts/test-resolve-preview-site.sh` locally to reproduce.
+8. **"the browser for the preview site could not be installed".** The preview was found, but the `Install Playwright MCP` step's `npm ci` failed, so the review would have had no browser for it. The npm error is in that step's log, just above the `::error::` line. A registry outage clears when you comment again; an error about the lockfile or a package that no longer resolves needs a fix to `.github/scripts/playwright-mcp/package-lock.json` at `platform-ref` — report it.
+
+## Code review says the site could not be checked
+
+**Symptoms:** a review on a repository with `SITE_URL_TEMPLATE` ran, but its summary says the site could not be checked, or the transcript shows no `mcp__playwright__` call.
+
+**Cause:** the preview was resolved, but the browser did not work. In order of likelihood:
+
+1. **The site is unreachable or asks for a password** (Vercel deployment protection, or a staging site behind a password). The review goes on without it and says so with the URL. Make the preview reachable without login, or accept that the site is not checked.
+2. **The page loaded but not the pull request's code.** The summary says the preview deployment's assets did not load: the site's loader did not trust the preview origin, or Vercel protection blocked the script. Fix the loader's allowlist for `*.vercel.app`.
+3. **The Playwright MCP or Chrome did not start.** The MCP installed but did not start, or could not launch `/usr/bin/google-chrome` (a failed install stops the review instead, see above). Look at the action's MCP server status in its own log. A runner image without Chrome or an `@playwright/mcp` bump that changed its flags are the usual causes; see [architecture.md](architecture.md#the-preview-site-and-the-performance-note) for what to check on a bump.
+4. **The site block was dropped.** The `Resolve review context` step logs `::warning::[code-review] the preview site URL is not valid` or `::warning::[code-review] the vitals tag is not valid`, and the prompt has no `Site checked:` block, so the review runs without the browser. Either value comes from the `Resolve preview site` step and is checked again before it reaches the prompt. Neither should happen with an unchanged `platform-ref`; report it with the run log.
 
 ## Still stuck
 

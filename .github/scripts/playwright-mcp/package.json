@@ -1,0 +1,8 @@
+{
+  "name": "code-review-playwright-mcp",
+  "private": true,
+  "description": "The browser of code-review.yml's preview-site review, installed with npm ci from the lockfile next to this file. See docs/architecture.md#the-preview-site-and-the-performance-note.",
+  "dependencies": {
+    "@playwright/mcp": "0.0.84"
+  }
+}

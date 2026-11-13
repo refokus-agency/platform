@@ -1,16 +1,50 @@
 #!/usr/bin/env bash
-# Stub `gh` for test-review-context.sh: answers `gh api ... <path>` from fixture files in
-# $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert on the calls made.
+# Stub `gh` for test-review-context.sh and test-resolve-preview-site.sh: answers `gh api ... <path>`
+# from fixture files in $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert
+# on the calls made.
 #
-# Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`>.
-# <name>.out is printed (default `[]`); <name>.rc is the exit code (default 0).
+# Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`> | graphql
+# (any `gh api graphql ...`) | deployments | statuses | pr_comment (`gh pr comment`).
+# <name>.out is printed (default `[]`, or for graphql a response with no closing issues);
+# <name>.rc is the exit code (default 0), and <name>.err the error printed with it (default
+# `gh: HTTP <rc>`). <name>.<n>.out and <name>.<n>.rc, when present, answer the n-th call to that
+# name instead, so a test can script a sequence (pending, pending, then success; 502, then 200).
+# `gh pr comment` also appends its `--body` value to pr_comment.body, one body per call. Like the
+# real gh outside a git checkout, which is where the workflow's steps run, it fails unless the
+# call names the repository with `--repo` or GH_REPO.
 printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
 path=""
 for a in "$@"; do
   case "$a" in repos/*) path=$a ;; esac
 done
+if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
+  path=graphql
+fi
+if [ "${1:-}" = pr ] && [ "${2:-}" = comment ]; then
+  case " $* " in
+    *" --repo "* | *" -R "*) ;;
+    *)
+      if [ -z "${GH_REPO:-}" ]; then
+        echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2
+        exit 1
+      fi
+      ;;
+  esac
+  path=pr_comment
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = --body ]; then
+      printf '%s\n--- end of body ---\n' "$a" >> "$STUB_DIR/pr_comment.body"
+    fi
+    prev=$a
+  done
+fi
 case "$path" in
+  graphql) name=graphql ;;
+  pr_comment) name=pr_comment ;;
   */stacks\?*) name=stacks ;;
+  */deployments/*/statuses*) name=statuses ;;
+  */deployments\?*) name=deployments ;;
   */pulls\?*base=*) name=siblings ;;
   */pulls\?*head=*)
     head=${path#*head=}
@@ -19,10 +53,26 @@ case "$path" in
     ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 99 ;;
 esac
-if [ -f "$STUB_DIR/$name.out" ]; then cat "$STUB_DIR/$name.out"; else printf '[]'; fi
-if [ -f "$STUB_DIR/$name.rc" ]; then
-  rc=$(cat "$STUB_DIR/$name.rc")
-  [ "$rc" = 0 ] || echo "gh: HTTP $rc" >&2
+n=$(( $(cat "$STUB_DIR/$name.count" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$n" > "$STUB_DIR/$name.count"
+if [ -f "$STUB_DIR/$name.$n.out" ]; then
+  cat "$STUB_DIR/$name.$n.out"
+elif [ -f "$STUB_DIR/$name.out" ]; then
+  cat "$STUB_DIR/$name.out"
+elif [ "$name" = graphql ]; then
+  printf '%s' '{"data":{"repository":{"pullRequest":{"closingIssuesReferences":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}'
+elif [ "$name" = pr_comment ]; then
+  :
+else
+  printf '[]'
+fi
+rcfile="$STUB_DIR/$name.$n.rc"
+[ -f "$rcfile" ] || rcfile="$STUB_DIR/$name.rc"
+if [ -f "$rcfile" ]; then
+  rc=$(cat "$rcfile")
+  if [ "$rc" != 0 ]; then
+    if [ -f "$STUB_DIR/$name.err" ]; then cat "$STUB_DIR/$name.err" >&2; else echo "gh: HTTP $rc" >&2; fi
+  fi
   exit "$rc"
 fi
 exit 0

@@ -85,9 +85,10 @@ jobs:
     # No explicit permissions block on purpose: the job inherits the caller's
     # granted permissions. Declaring a scope here (e.g. `deployments: write`)
     # would force EVERY caller to grant it or the run fails at startup. By
-    # inheriting, the "Record GitHub deployment" step below stays opt-in —
-    # callers that grant `deployments: write` get deploys recorded; those that
-    # don't simply skip it. Callers still need `contents: read` (checkout) and
+    # inheriting, the "Start/Finish GitHub deployment" steps below decide per
+    # environment: preview requires `deployments: write` (the start step fails
+    # without it, before the build); stage/production stay opt-in and only
+    # warn. Callers also need `contents: read` (checkout) and
     # `pull-requests: write` (PR comment); see examples/*.yml.
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -122,6 +123,32 @@ jobs:
           repository: refokus-agency/platform
           ref: ${{ inputs.platform-ref }}
           path: .platform
+
+      - name: Start GitHub deployment
+        id: gh-deployment
+        if: ${{ !inputs.transferred }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          # On pull_request, github.sha is the merge commit; the deployment is
+          # recorded against the PR head so it can be looked up by that SHA.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Stage/production record the branch, as before this step existed.
+          REF_NAME: ${{ github.ref_name }}
+        with:
+          script: |
+            let start;
+            try {
+              ({ start } = require('./.platform/.github/scripts/github-deployment.cjs'));
+            } catch (error) {
+              // `platform-ref` points at a ref older than this script. Same
+              // rule as onApiError(): preview fails, stage/production warn.
+              const message = `Could not load github-deployment.cjs from platform-ref: ${error.message}`;
+              if (process.env.ENVIRONMENT === 'preview') core.setFailed(message);
+              else core.warning(message);
+              return;
+            }
+            await start({ github, context, core });
 
       - name: Configure npm for GitHub Packages
         if: ${{ !inputs.transferred }}
@@ -184,6 +211,7 @@ jobs:
         shell: bash
 
       - name: Alias for stage
+        id: alias
         if: ${{ !inputs.transferred && inputs.environment == 'stage' }}
         run: |
           STAGE_ALIAS="${GITHUB_REPOSITORY##*/}-stage.vercel.app"
@@ -227,16 +255,21 @@ jobs:
               });
             }
 
-      - name: Record GitHub deployment
-        # Only for the persistent environments (production/stage). Preview PR
-        # deploys are ephemeral and already surfaced via the PR comment above.
-        if: ${{ !inputs.transferred && (inputs.environment == 'production' || inputs.environment == 'stage') }}
+      # Keep this the last step: `always()` makes it run after a failed or
+      # cancelled step too, so the deployment is not left `in_progress`.
+      # Skipped when the start step created no deployment. The final state
+      # comes from the deploy (and stage alias) outcome, not `job.status`, so a
+      # failed PR comment doesn't record a live deploy as failed.
+      - name: Finish GitHub deployment
+        if: ${{ always() && !inputs.transferred && steps.gh-deployment.outputs.deployment-id != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           ENVIRONMENT: ${{ inputs.environment }}
-          REF: ${{ github.ref_name }}
+          DEPLOYMENT_ID: ${{ steps.gh-deployment.outputs.deployment-id }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          ALIAS_OUTCOME: ${{ steps.alias.outcome }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
         with:
           script: |
-            const run = require('./.platform/.github/scripts/record-github-deployment.cjs');
-            await run({ github, context, core });
+            const { finish } = require('./.platform/.github/scripts/github-deployment.cjs');
+            await finish({ github, context, core });
