@@ -33,13 +33,13 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v2 # x-release-please-major
     secrets: inherit
 
   deploy-preview:
     needs: ci
     if: github.actor != 'dependabot[bot]'
-    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1 # x-release-please-major
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v2 # x-release-please-major
     with:
       environment: preview
     secrets: inherit
