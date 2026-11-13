@@ -27,8 +27,13 @@ permissions:
   # cannot authenticate and the run fails. The reusable cannot detect the omission
   # from the inside, so it has to be granted here.
   id-token: write
+  # deployments: read is needed when the repo sets the SITE_URL_TEMPLATE variable: the review then
+  # opens the pull request's Vercel preview, which it finds through the deployment pr-preview
+  # records. Without it that review stops with a comment asking for it. Harmless otherwise.
+  # See docs/secrets.md#site_url_template-for-the-preview-site-review.
+  deployments: read
 
 jobs:
   code-review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1 # x-release-please-major
     secrets: inherit

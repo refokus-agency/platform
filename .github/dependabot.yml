@@ -20,3 +20,16 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # The review browser of code-review.yml (@playwright/mcp and the exact Playwright alpha it pins),
+  # installed with `npm ci` from this lockfile in a job that holds the Anthropic credential. The
+  # cooldown keeps the "at least two weeks old" rule for version bumps; security updates are not
+  # held back by it. A bump PR still needs the checks in
+  # docs/architecture.md#the-preview-site-and-the-performance-note: tool names and flags still
+  # exist, and a run through test/code-review-next before merging.
+  - package-ecosystem: "npm"
+    directory: "/.github/scripts/playwright-mcp"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14

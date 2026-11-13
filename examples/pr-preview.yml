@@ -23,6 +23,9 @@ permissions:
   contents: read
   packages: read
   pull-requests: write
+  # Required: deploy.yml records each preview as a GitHub deployment and
+  # fails the preview deploy without this.
+  deployments: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -30,13 +33,13 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
     secrets: inherit
 
   deploy-preview:
     needs: ci
     if: github.actor != 'dependabot[bot]'
-    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1 # x-release-please-major
     with:
       environment: preview
     secrets: inherit

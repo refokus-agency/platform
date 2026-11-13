@@ -103,7 +103,7 @@ Your repo needs these secrets available (via org inheritance or repo-level):
 | `VERCEL_ORG_ID` | `deploy.yml` | org |
 | `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** (each project has its own) |
 
-`GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers). `pr-preview.yml` additionally declares `pull-requests: write` so `deploy.yml` can post the preview URL as a PR comment.
+`GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers). `pr-preview.yml` additionally declares `pull-requests: write` so `deploy.yml` can post the preview URL as a PR comment, and `deployments: write` so it can record the preview as a GitHub deployment. The preview deploy fails without `deployments: write`; the stage and production callers declare it too, but there it is optional (a missing grant only logs a warning). See [architecture.md → `deploy.yml`](architecture.md#reusable-workflow-deployyml).
 
 Check the Vercel secrets under **Settings → Secrets and variables → Actions** in the repo. Anything inherited from the org will show up under "Organization secrets".
 
