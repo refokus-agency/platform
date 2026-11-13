@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [2.0.0](https://github.com/refokus-agency/platform/compare/v1.12.1...v2.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **code-review:** deploy.yml requires `deployments: write` from preview callers, and code-review.yml requires `deployments: read` when SITE_URL_TEMPLATE is set. See docs/migration.md, "Upgrading from v1 to v2".
+
+### Features
+
+* **code-review:** give the review PR context and require evidence for findings ([#137](https://github.com/refokus-agency/platform/issues/137)) ([b831170](https://github.com/refokus-agency/platform/commit/b831170eab6da4effdadb444c5ac45f5a1bb8321)), closes [#117](https://github.com/refokus-agency/platform/issues/117) [#120](https://github.com/refokus-agency/platform/issues/120) [#121](https://github.com/refokus-agency/platform/issues/121) [#122](https://github.com/refokus-agency/platform/issues/122)
+
 ## [1.12.1](https://github.com/refokus-agency/platform/compare/v1.12.0...v1.12.1) (2026-10-07)
 
 

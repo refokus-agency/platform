@@ -57,12 +57,12 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v2 # x-release-please-major
     secrets: inherit
 
   release:
     needs: ci
-    uses: refokus-agency/platform/.github/workflows/release.yml@v1 # x-release-please-major
+    uses: refokus-agency/platform/.github/workflows/release.yml@v2 # x-release-please-major
     with:
       registry: npm
     secrets: inherit
