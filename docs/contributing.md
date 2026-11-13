@@ -127,7 +127,7 @@ A change is **breaking** if it:
 For breaking changes:
 
 1. Use a `feat!:` prefix or include a `BREAKING CHANGE:` footer in the commit. Release-please picks this up and cuts a major bump (`v1.x.y` → `v2.0.0`) on the next release PR.
-2. Document the migration path in `docs/migrations/v1-to-v2.md` (or similar).
+2. Document the migration path in a `## Upgrading from vN to vN+1` section of [migration.md](migration.md) (see [Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2)).
 3. Announce in the team channel before merging the release PR — once `v2` exists, `@v1` stops moving and consumers stay on the old line until they migrate explicitly.
 4. Update `examples/` in this repo to point at `@v2` so new repos start on the current major.
 

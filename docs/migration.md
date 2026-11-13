@@ -126,10 +126,32 @@ Don't leave a half-migrated state.
 
 ## Upgrading from v1 to v2
 
-Already on the centralized workflows and moving a caller from `@v1` to `@v2`:
+Already on the centralized workflows and moving a caller from `@v1` to `@v2`.
+
+### Re-pin every caller, not only the ones that changed
+
+v2 is a version of the whole repository, not of one workflow: `ci.yml`, `deploy.yml`, `release.yml` and `code-review.yml` all moved to `@v2` together. Once `v2` exists the `v1` tag stops moving, so a caller left on `@v1` keeps working but never gets another fix (see [contributing.md → Breaking changes](contributing.md#breaking-changes)). Change `@v1` to `@v2` in every `uses: refokus-agency/platform/...` line of the repository's `.github/workflows/`, in the same pull request:
+
+```bash
+grep -rn 'refokus-agency/platform/.github/workflows/.*@v1' .github/workflows/
+```
+
+Do not mix majors in one repository: `pr-preview.yml` on `@v2` records the preview deployment that `comment-code-review.yml` on `@v2` reads.
+
+### Required changes
 
 - **`pr-preview.yml` must grant `deployments: write`.** v2's `deploy.yml` records every preview as a GitHub deployment and fails the preview deploy, before the build, when it can't. Add the line to the caller's `permissions:` block, as in [`examples/pr-preview.yml`](../examples/pr-preview.yml). Stage and production callers need no change: without the permission they still deploy and only log a warning.
 - **`comment-code-review.yml` must grant `deployments: read` when the repository sets `SITE_URL_TEMPLATE`.** v2's `code-review.yml` reads the preview deployment of the pull request head to review the site, and stops the review with a comment when it cannot read deployments. Add the line to the caller's `permissions:` block, as in [`examples/comment-code-review.yml`](../examples/comment-code-review.yml). A repository without the variable needs no change. See [secrets.md → `SITE_URL_TEMPLATE`](secrets.md#site_url_template-for-the-preview-site-review).
+
+### Behavior changes with no action required
+
+These change what a review looks like for every v2 caller. Nothing in the caller file needs editing, but tell the people who read the reviews.
+
+- **Every review posts a summary comment**, with findings or without. In v1 a summary was posted only when the review found nothing.
+- **Every inline finding carries a verdict.** `🟢 CONFIRMED` is proven from the code; `🟠 PLAUSIBLE` is likely but could not be proven from the checkout and is now posted, marked unverified, with the reason. v1 dropped those. See [architecture.md → Verdicts, the summary and the review context](architecture.md#verdicts-the-summary-and-the-review-context).
+- **The review reads more context**: the related pull requests in the stack and on the same base, the issues the pull request closes and their epic. Changes that belong to another issue are flagged `🔵 OUT OF SCOPE`, and acceptance criteria that are not met show up in the summary.
+- **Every review weighs performance** (LCP, CLS, INP). The block is appended outside the `prompt` input, so it applies to repositories without a site too, where the review weighs performance from the code alone.
+- **Callers that override `prompt`** keep their own text and lose the default's summary and verdict rules, but still get the context blocks and the performance block. A review that posts inline findings without a summary now gets a "posted its findings but no summary" note in the job.
 
 ## Migration order recommendation
 
