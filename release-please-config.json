@@ -5,7 +5,15 @@
       "release-type": "simple",
       "include-component-in-tag": false,
       "extra-files": [
-        { "type": "generic", "path": "README.md" }
+        { "type": "generic", "path": "README.md" },
+        { "type": "generic", "path": "examples/comment-code-review.yml" },
+        { "type": "generic", "path": "examples/main-production.yml" },
+        { "type": "generic", "path": "examples/main-release-npm.yml" },
+        { "type": "generic", "path": "examples/main-release.yml" },
+        { "type": "generic", "path": "examples/main-stage.yml" },
+        { "type": "generic", "path": "examples/pr-ci.yml" },
+        { "type": "generic", "path": "examples/pr-preview.yml" },
+        { "type": "generic", "path": "examples/production-deploy.yml" }
       ]
     }
   }

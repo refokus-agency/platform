@@ -446,6 +446,8 @@ Callers reference the floating major tag `@v1`. Releases are automated by [relea
 2. release-please opens or updates a release PR aggregating unreleased commits, computing the next semver bump, and updating `CHANGELOG.md`.
 3. Merging the release PR tags the new version (`v1.x.y`), creates a GitHub Release, and the `release-please.yml` workflow force-moves `@v1` to the same commit.
 
+On a major bump the release PR also rewrites the `@vN` refs in `README.md` and in every `uses:` line of `examples/`, so new projects copy the new major the moment its tag exists. Each of those lines ends in `# x-release-please-major`, and each file is listed under `extra-files` in `release-please-config.json`. The marker replaces the first number on its line, so a `uses:` line must have no other digit before `@vN`. A new example file needs both the marker and an `extra-files` entry.
+
 Why a floating `@v1` instead of pinned `@v1.2.3` per caller?
 
 - One tag to update means non-breaking improvements propagate without 10+ PRs per fix.

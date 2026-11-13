@@ -36,12 +36,12 @@ concurrency:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v1 # x-release-please-major
     secrets: inherit
 
   deploy-stage:
     needs: ci
-    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1 # x-release-please-major
     with:
       environment: stage
     secrets: inherit
