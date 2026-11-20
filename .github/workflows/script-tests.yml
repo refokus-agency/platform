@@ -1,0 +1,27 @@
+name: Script tests
+
+# Runs the tests of the logic the reusables execute in consumer repos. A bug merged here
+# reaches every caller through the force-moved @v1 tag — this is the gate that stops it first.
+#
+# Every test stubs the GitHub API: nothing here needs a token or the network.
+
+on:
+  pull_request:
+
+# Read-only, by design: pull_request runs for forks too, and nothing here writes.
+permissions:
+  contents: read
+
+jobs:
+  resolve-actor:
+    name: code-review actor gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # yq is preinstalled on ubuntu-latest; the tests need nothing else.
+      - name: Test the Resolve actor step
+        run: ./.github/scripts/test-resolve-actor.sh

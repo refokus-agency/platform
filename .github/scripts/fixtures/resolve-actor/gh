@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Stub `gh` for test-resolve-actor.sh: answers `gh api ... <path>` from fixture files in
+# $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert on the calls made.
+#
+# Fixture name: user (`users/<login>`) | permission (`repos/.../collaborators/<login>/permission`).
+# It ignores `--jq`: a fixture for a call made with `--jq` holds the filtered value, not the JSON.
+# <name>.out is printed (default empty); <name>.rc is the exit code (default 0), and <name>.err
+# the error printed with it (default `gh: HTTP <rc>`). Any other call exits 99.
+printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
+path=""
+for a in "$@"; do
+  case "$a" in repos/* | users/*) path=$a ;; esac
+done
+case "$path" in
+  users/*) name=user ;;
+  */collaborators/*/permission) name=permission ;;
+  *) echo "stub gh: unexpected call: $*" >&2; exit 99 ;;
+esac
+if [ -f "$STUB_DIR/$name.out" ]; then
+  cat "$STUB_DIR/$name.out"
+fi
+if [ -f "$STUB_DIR/$name.rc" ]; then
+  rc=$(cat "$STUB_DIR/$name.rc")
+  if [ "$rc" != 0 ]; then
+    if [ -f "$STUB_DIR/$name.err" ]; then cat "$STUB_DIR/$name.err" >&2; else echo "gh: HTTP $rc" >&2; fi
+  fi
+  exit "$rc"
+fi
+exit 0

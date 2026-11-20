@@ -328,13 +328,12 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         # The comment author must be human (or an allowed bot) AND have write access. Both
         # checks pre-empt a hard red failure inside claude-code-action, turning it into a green
-        # skip. `author_association` is a deliberate approximation of write access — see
-        # docs/architecture.md#four-gates-all-skipping-green for both failure modes and the
-        # caveat before changing either check.
+        # skip. Write access is read from the collaborator permission API, the same call and the
+        # same admin/write rule the action applies, so the two always agree. See
+        # docs/architecture.md#four-gates-all-skipping-green before changing either check.
         env:
           GH_TOKEN: ${{ github.token }}
           ALLOWED_BOTS: ${{ inputs.allowed-bots }}
-          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
         run: |
           normalize() {
             printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\[bot\]$//'
@@ -399,13 +398,25 @@ jobs:
             exit 0
           fi
 
-          case "$AUTHOR_ASSOCIATION" in
-            OWNER | MEMBER | COLLABORATOR)
+          # The legacy `permission` field, not `role_name`: it folds maintain into write and triage
+          # into read, which is exactly what claude-code-action's own check compares against.
+          # `github.token` can always make this call: GitHub's "Permissions required for GitHub
+          # Apps" page lists it under Metadata: read for installation tokens. A failed
+          # lookup skips rather than grants: unlike the account-type lookup above, there is no
+          # safe value to assume here.
+          if ! permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" --jq .permission 2>/dev/null) || [ -z "$permission" ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s permission on this repository. Retry the trigger phrase."
+            exit 0
+          fi
+
+          case "$permission" in
+            admin | write)
               echo "eligible=true" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR}, whose association with this repository is ${AUTHOR_ASSOCIATION:-NONE}. Requesting a review requires write access."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR}, whose permission on this repository is ${permission}. Requesting a review requires write access."
               ;;
           esac
         shell: bash
