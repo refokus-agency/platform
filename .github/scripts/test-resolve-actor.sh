@@ -6,9 +6,8 @@
 #
 # The write-access half must agree with claude-code-action's own check: the collaborator
 # permission API, `admin` or `write` in the legacy `permission` field. Both lookups (account type
-# and permission) share one helper: a 5xx, 429 or secondary rate limit is retried (3 attempts,
-# PERMISSION_RETRY_SECONDS apart, 0 here); any other 4xx and an exhausted primary rate limit stop
-# at once.
+# and permission) share one helper: a 5xx or 429 is retried (3 attempts, LOOKUP_RETRY_SECONDS
+# apart, 0 here); any other 4xx and either rate limit, primary or secondary, stop at once.
 #
 # Usage:
 #   ./.github/scripts/test-resolve-actor.sh                 # every case
@@ -40,7 +39,7 @@ setup() {
   : >"$STUB_DIR/calls.log"
   export GITHUB_REPOSITORY=acme/app GH_TOKEN=x GITHUB_ACTOR=alice ALLOWED_BOTS=''
   # The step retries a failed lookup; no case should wait for it.
-  export PERMISSION_RETRY_SECONDS=0
+  export LOOKUP_RETRY_SECONDS=0
   fx user User
 }
 fx() { printf '%s' "$2" >"$STUB_DIR/$1.out"; }
@@ -138,11 +137,22 @@ case_rate_limited_reset() {
   fx rate_limit "$(( $(date +%s) + 600 ))"
   run_step; expect_ok; expect_eligible false; permission_calls 1; says "resets in about 10 min"
 }
-# A secondary rate limit is a 403 too, but it passes: it is retried like a 5xx.
+# GitHub asks a client hitting a secondary rate limit to wait at least a minute, longer than the
+# retries would: no retry, and advice to try again in a few minutes. A later call would pass, so
+# this also proves the step did not make one.
 case_secondary_rate_limited() {
   fxrc permission.1 1; fxerr permission.1 'gh: You have exceeded a secondary rate limit. (HTTP 403)'
   fx permission write
-  run_step; expect_ok; expect_eligible true; permission_calls 2; says "retry 1/2"
+  run_step; expect_ok; expect_eligible false; permission_calls 1; never_says "retry 1/2"
+  says "[code-review] gh: You have exceeded a secondary rate limit. (HTTP 403)"
+  says "secondary rate limit refused to look up alice's permission"; says "in a few minutes"
+  never_says "will not change that"
+}
+# The account-type lookup stops on it the same way.
+case_user_secondary_rate_limited() {
+  fxrc user 1; fxerr user 'gh: You have exceeded a secondary rate limit. (HTTP 429)'
+  run_step; expect_ok; expect_eligible false; user_calls 1; never_asked_permission
+  says "secondary rate limit refused to look up alice's account type"; says "in a few minutes"
 }
 case_too_many_requests() {
   fxrc permission 1; fxerr permission 'gh: Too Many Requests (HTTP 429)'
@@ -210,13 +220,23 @@ case_unconfirmed_listed() {
   fxrc user 1; fxerr user 'gh: Not Found (HTTP 404)'
   run_step; expect_ok; expect_eligible true; never_asked_permission
 }
+# A 404 for a login without `[bot]` is a deleted or renamed account, not an app: it skips with
+# gh's error, and the notice neither calls it a bot nor points at allowed-bots. Even a list that
+# names the login does not admit it.
+case_user_not_found() {
+  export ALLOWED_BOTS='alice'
+  fxrc user 1; fxerr user 'gh: Not Found (HTTP 404)'
+  run_step; expect_ok; expect_eligible false; user_calls 1; never_asked_permission
+  says "[code-review] gh: Not Found (HTTP 404)"; says "GitHub has no account named alice"
+  says "deleted or renamed"; never_says "refused to look up"; never_says "not a human"; never_says "unconfirmed"; never_says "GitHub App"; never_says "allowed-bots"
+}
 
 # --- runner ----------------------------------------------------------------------------------
 
 ALL=(admin write read none empty lookup_fails lookup_recovers rate_limited rate_limited_reset
-  secondary_rate_limited too_many_requests lookup_refused unauthorized user_lookup_recovers
-  user_lookup_fails user_lookup_refused allowed_bot unlisted_bot self_trigger unconfirmed_wildcard
-  unconfirmed_listed)
+  secondary_rate_limited user_secondary_rate_limited too_many_requests lookup_refused unauthorized
+  user_lookup_recovers user_lookup_fails user_lookup_refused allowed_bot unlisted_bot self_trigger
+  unconfirmed_wildcard unconfirmed_listed user_not_found)
 [ $# -gt 0 ] && ALL=("$@")
 
 failed=()
@@ -225,7 +245,13 @@ for c in "${ALL[@]}"; do
   n=$((n + 1))
   setup
   CASE_FAIL=0
-  "case_$c"
+  # A mistyped name must fail, not pass by running nothing.
+  if declare -F "case_$c" >/dev/null; then
+    "case_$c"
+  else
+    echo "    FAIL: no such case: $c"
+    CASE_FAIL=1
+  fi
   if [ "$CASE_FAIL" -eq 0 ]; then
     echo "PASS ${n}/${#ALL[@]} $c"
   else

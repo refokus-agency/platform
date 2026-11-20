@@ -458,13 +458,17 @@ jobs:
           }
 
           # gh_lookup WHAT PATH JQ: one GitHub API read, used for both lookups below. These are
-          # network calls, so a 5xx, a 429, a secondary rate limit or a network error is retried:
-          # 3 attempts in all, 5 s apart (like resolve-preview-site.sh). Any other 4xx will not
-          # change on retry and stops at once, and so does an exhausted primary rate limit, which
-          # only clears when the hourly quota resets. Sets `lookup_value` and `lookup_result`
-          # (ok | refused | rate-limited | failed), and `lookup_http` (the status gh reported, if
-          # any). Always returns 0: the caller decides, and `bash -e` must not end the step here.
+          # network calls, so a 5xx, a 429 or a network error is retried: 3 attempts in all, 5 s
+          # apart (like resolve-preview-site.sh). Any other 4xx will not change on retry and stops
+          # at once. So do both rate limits: an exhausted primary one only clears when the hourly
+          # quota resets, and GitHub asks a client hitting a secondary one to wait at least a
+          # minute, longer than the retries would. Sets `lookup_value` and `lookup_result`
+          # (ok | refused | rate-limited | throttled | failed), and `lookup_http` (the status gh
+          # reported, if any). Always returns 0: the caller decides, and `bash -e` must not end
+          # the step here.
           lookup_err=$(mktemp)
+          # Only so the tests can set the delay between retries to 0; callers never set it.
+          lookup_retry_seconds=${LOOKUP_RETRY_SECONDS:-5}
           gh_lookup() {
             local try
             lookup_value=''
@@ -478,7 +482,8 @@ jobs:
               lookup_value=''
               lookup_http=$(grep -oE 'HTTP [0-9]{3}' "$lookup_err" | tail -n 1 | sed 's/^HTTP //' || true)
               if grep -qi 'secondary rate limit' "$lookup_err"; then
-                :
+                lookup_result=throttled
+                return 0
               elif grep -qi 'API rate limit exceeded' "$lookup_err"; then
                 lookup_result=rate-limited
                 return 0
@@ -487,8 +492,8 @@ jobs:
                 return 0
               fi
               if [ "$try" -lt 3 ]; then
-                echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s $1 failed; retry ${try}/2 in ${PERMISSION_RETRY_SECONDS:-5} s."
-                sleep "${PERMISSION_RETRY_SECONDS:-5}"
+                echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s $1 failed; retry ${try}/2 in ${lookup_retry_seconds} s."
+                sleep "$lookup_retry_seconds"
               fi
             done
             return 0
@@ -507,6 +512,9 @@ jobs:
             fi
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             case "$lookup_result" in
+              not-found)
+                echo "::notice::[code-review] skipped: GitHub has no account named ${GITHUB_ACTOR} (error above); it was most likely deleted or renamed after the comment. Post the trigger phrase again from the current account."
+                ;;
               refused)
                 echo "::notice::[code-review] skipped: GitHub refused to look up ${GITHUB_ACTOR}'s $1 (error above). Retrying the trigger phrase will not change that."
                 ;;
@@ -520,16 +528,21 @@ jobs:
                 fi
                 echo "::notice::[code-review] skipped: the GitHub API rate limit of this repository's token is exhausted, so ${GITHUB_ACTOR}'s $1 could not be looked up. It resets ${wait}; retrying before then will fail the same way. Post the trigger phrase again after the reset."
                 ;;
+              throttled)
+                echo "::notice::[code-review] skipped: GitHub's secondary rate limit refused to look up ${GITHUB_ACTOR}'s $1 (error above). It clears on its own after a short wait: post the trigger phrase again in a few minutes."
+                ;;
               *)
                 echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s $1 after 3 tries (last error above). Retry the trigger phrase."
                 ;;
             esac
           }
 
-          # A 404 means a GitHub App actor with no backing user account, which the action also
-          # treats as a bot. Any other failure skips the review (green is the safe direction for
-          # an advisory job) instead of guessing a type: guessing `Bot` would skip a real human
-          # as "not a human" and point the commenter at allowed-bots.
+          # A 404 for a login ending in `[bot]` means a GitHub App actor with no backing user
+          # account, which the action also treats as a bot. A 404 for any other login is a
+          # deleted or renamed account, not an app, so it skips like every other failure (with
+          # its own message, saying so): the review is skipped (green is the safe direction for an advisory job) instead of
+          # guessing a type, since guessing `Bot` would skip a real human as "not a human" and
+          # point the commenter at allowed-bots.
           #
           # `actor_lookup` records whether that type was actually CONFIRMED by an answer, because
           # the '*' branch below exempts the actor from the write-access check, so a type inferred
@@ -539,10 +552,13 @@ jobs:
           if [ "$lookup_result" = ok ]; then
             actor_lookup=confirmed
             actor_type=$lookup_value
-          elif [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ]; then
+          elif [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ] && [[ "$GITHUB_ACTOR" == *'[bot]' ]]; then
             actor_lookup=unconfirmed
             actor_type='Bot'
           else
+            if [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ]; then
+              lookup_result=not-found
+            fi
             lookup_skip 'account type'
             exit 0
           fi

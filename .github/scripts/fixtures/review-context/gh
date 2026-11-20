@@ -9,8 +9,10 @@
 # It ignores `--jq`: a fixture for a call made with `--jq` holds the filtered value, not the JSON.
 # <name>.out is printed (default `[]`, or for graphql a response with no closing issues);
 # <name>.rc is the exit code (default 0), and <name>.err the error printed with it (default
-# `gh: HTTP <rc>`). <name>.<n>.out, <name>.<n>.rc and <name>.<n>.err, when present, answer the n-th call to that
-# name instead, so a test can script a sequence (pending, pending, then success; 502, then 200).
+# `gh: HTTP <rc>`). <name>.<n>.out, <name>.<n>.rc and <name>.<n>.err, when present, answer the
+# n-th call to that name instead, so a test can script a sequence (pending, pending, then
+# success; 502, then 200). Each falls back on its own: <name>.<n>.err to <name>.err, then to the
+# default. An error file is read only when that call's exit code is non-zero.
 # `gh pr comment` also appends its `--body` value to pr_comment.body, one body per call. Like the
 # real gh outside a git checkout, which is where the workflow's steps run, it fails unless the
 # call names the repository with `--repo` or GH_REPO.
