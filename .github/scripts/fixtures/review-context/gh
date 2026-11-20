@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Stub `gh` for test-review-context.sh and test-resolve-preview-site.sh: answers `gh api ... <path>`
-# from fixture files in $STUB_DIR and logs every call to $STUB_DIR/calls.log, so tests can assert
-# on the calls made.
+# Stub `gh` for test-review-context.sh, test-resolve-preview-site.sh and test-resolve-actor.sh:
+# answers `gh api ... <path>` from fixture files in $STUB_DIR and logs every call to
+# $STUB_DIR/calls.log, so tests can assert on the calls made.
 #
 # Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`> | graphql
-# (any `gh api graphql ...`) | deployments | statuses | pr_comment (`gh pr comment`).
+# (any `gh api graphql ...`) | deployments | statuses | pr_comment (`gh pr comment`) | user
+# (`users/<login>`) | permission (`repos/.../collaborators/<login>/permission`).
+# It ignores `--jq`: a fixture for a call made with `--jq` holds the filtered value, not the JSON.
 # <name>.out is printed (default `[]`, or for graphql a response with no closing issues);
 # <name>.rc is the exit code (default 0), and <name>.err the error printed with it (default
 # `gh: HTTP <rc>`). <name>.<n>.out and <name>.<n>.rc, when present, answer the n-th call to that
@@ -15,7 +17,7 @@
 printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
 path=""
 for a in "$@"; do
-  case "$a" in repos/*) path=$a ;; esac
+  case "$a" in repos/* | users/*) path=$a ;; esac
 done
 if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
   path=graphql
@@ -45,6 +47,8 @@ case "$path" in
   */stacks\?*) name=stacks ;;
   */deployments/*/statuses*) name=statuses ;;
   */deployments\?*) name=deployments ;;
+  users/*) name=user ;;
+  */collaborators/*/permission) name=permission ;;
   */pulls\?*base=*) name=siblings ;;
   */pulls\?*head=*)
     head=${path#*head=}
