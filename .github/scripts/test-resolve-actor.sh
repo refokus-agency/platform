@@ -125,6 +125,35 @@ case_lookup_fails() {
   says "retry 1/2"; says "retry 2/2"; says "[code-review] gh: Bad Gateway (HTTP 502)"; never_says "gh: gh:"
   says "could not look up alice's permission"; says "Retry the trigger phrase"
 }
+# Two 502s, then an exit 0 with nothing printed: the 502 is what the log shows, not lost to the
+# last try's empty stderr, and the log also says the last try came back empty.
+case_error_then_empty() {
+  fxrc permission.1 1; fxerr permission.1 'gh: Bad Gateway (HTTP 502)'
+  fxrc permission.2 1; fxerr permission.2 'gh: Bad Gateway (HTTP 502)'
+  fx permission.3 ''
+  run_step; expect_ok; expect_eligible false; permission_calls 3
+  says "[code-review] gh: Bad Gateway (HTTP 502)"
+  says "gh returned an empty or null permission on this repository for alice."
+  says "could not look up alice's permission"
+}
+# An error the account-type lookup recovered from is not shown for the permission lookup after it.
+case_error_not_carried_over() {
+  fxrc user.1 1; fxerr user.1 'gh: Bad Gateway (HTTP 502)'
+  fx permission ''
+  run_step; expect_ok; expect_eligible false; user_calls 2; permission_calls 3
+  never_says "Bad Gateway"; says "gh returned an empty or null permission on this repository for alice."
+}
+# A non-numeric delay must not reach `sleep` and fail the step red: it falls back to 5 s. Also
+# checks the EXIT trap removes the step's scratch files.
+case_bad_retry_seconds() {
+  export LOOKUP_RETRY_SECONDS=x TMPDIR="$T/tmp"
+  mkdir -p "$TMPDIR"
+  fxrc permission.1 1; fxerr permission.1 'gh: Bad Gateway (HTTP 502)'; fx permission write
+  run_step; expect_ok; expect_eligible true; permission_calls 2; says "retry 1/2 in 5 s"
+  local left
+  left=$(find "$TMPDIR" -mindepth 1 | tr '\n' ' ')
+  [ -z "$left" ]; check "scratch files removed (left: $left)" $?
+}
 # One blip, then an answer: the review runs.
 case_lookup_recovers() {
   fxrc permission.1 1; fx permission write
@@ -239,7 +268,8 @@ case_user_not_found() {
 
 # --- runner ----------------------------------------------------------------------------------
 
-ALL=(admin write read none empty null lookup_fails lookup_recovers rate_limited rate_limited_reset
+ALL=(admin write read none empty null lookup_fails error_then_empty error_not_carried_over
+  bad_retry_seconds lookup_recovers rate_limited rate_limited_reset
   secondary_rate_limited user_secondary_rate_limited too_many_requests lookup_refused unauthorized
   user_lookup_recovers user_lookup_fails user_lookup_refused allowed_bot unlisted_bot self_trigger
   unconfirmed_wildcard unconfirmed_listed user_not_found)
