@@ -109,8 +109,14 @@ case_none() { fx permission none; run_step; expect_ok; expect_eligible false; as
 # an error that is not there.
 case_empty() {
   fx permission ''; run_step; expect_ok; expect_eligible false; asked_permission alice
-  permission_calls 3; says "[code-review] gh returned an empty permission on this repository for alice."
+  permission_calls 3; says "[code-review] gh returned an empty or null permission on this repository for alice."
   says "could not look up alice's permission"; says "Retry the trigger phrase"
+}
+# A 200 without the field: --jq prints `null`, which must not pass as a permission named "null".
+case_null() {
+  fx permission null; run_step; expect_ok; expect_eligible false; asked_permission alice
+  permission_calls 3; says "gh returned an empty or null permission on this repository for alice."
+  never_says "is null"; says "could not look up alice's permission"
 }
 # A transient failure gets 3 attempts in all, and gh's error reaches the log under one prefix.
 case_lookup_fails() {
@@ -233,7 +239,7 @@ case_user_not_found() {
 
 # --- runner ----------------------------------------------------------------------------------
 
-ALL=(admin write read none empty lookup_fails lookup_recovers rate_limited rate_limited_reset
+ALL=(admin write read none empty null lookup_fails lookup_recovers rate_limited rate_limited_reset
   secondary_rate_limited user_secondary_rate_limited too_many_requests lookup_refused unauthorized
   user_lookup_recovers user_lookup_fails user_lookup_refused allowed_bot unlisted_bot self_trigger
   unconfirmed_wildcard unconfirmed_listed user_not_found)

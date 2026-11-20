@@ -462,10 +462,12 @@ jobs:
           # apart (like resolve-preview-site.sh). Any other 4xx will not change on retry and stops
           # at once. So do both rate limits: an exhausted primary one only clears when the hourly
           # quota resets, and GitHub asks a client hitting a secondary one to wait at least a
-          # minute, longer than the retries would. Sets `lookup_value` and `lookup_result`
-          # (ok | refused | rate-limited | throttled | failed), and `lookup_http` (the status gh
-          # reported, if any). Always returns 0: the caller decides, and `bash -e` must not end
-          # the step here.
+          # minute, longer than the retries would. An empty answer, or the `null` that --jq
+          # prints for a missing field, is not an answer and is retried like a 5xx. Sets
+          # `lookup_value` and `lookup_result` (ok | refused | rate-limited | throttled | failed),
+          # and `lookup_http` (the status gh reported, if any). The caller may then turn
+          # `refused` with HTTP 404 into `not-found`, the one other value lookup_skip handles.
+          # Always returns 0: the caller decides, and `bash -e` must not end the step here.
           lookup_err=$(mktemp)
           # Only so the tests can set the delay between retries to 0; callers never set it.
           lookup_retry_seconds=${LOOKUP_RETRY_SECONDS:-5}
@@ -475,7 +477,7 @@ jobs:
             lookup_result=failed
             lookup_http=''
             for try in 1 2 3; do
-              if lookup_value=$(gh api "$2" --jq "$3" 2>"$lookup_err") && [ -n "$lookup_value" ]; then
+              if lookup_value=$(gh api "$2" --jq "$3" 2>"$lookup_err") && [ -n "$lookup_value" ] && [ "$lookup_value" != null ]; then
                 lookup_result=ok
                 return 0
               fi
@@ -508,7 +510,7 @@ jobs:
             if [ -s "$lookup_err" ]; then
               sed 's/^gh: //; s/^/[code-review] gh: /' "$lookup_err"
             else
-              echo "[code-review] gh returned an empty $1 for ${GITHUB_ACTOR}."
+              echo "[code-review] gh returned an empty or null $1 for ${GITHUB_ACTOR}."
             fi
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             case "$lookup_result" in
@@ -539,9 +541,9 @@ jobs:
 
           # A 404 for a login ending in `[bot]` means a GitHub App actor with no backing user
           # account, which the action also treats as a bot. A 404 for any other login is a
-          # deleted or renamed account, not an app, so it skips like every other failure (with
-          # its own message, saying so): the review is skipped (green is the safe direction for an advisory job) instead of
-          # guessing a type, since guessing `Bot` would skip a real human as "not a human" and
+          # deleted or renamed account, not an app, so it skips like every other failure, with
+          # its own message saying so. Skipping (green is the safe direction for an advisory job)
+          # beats guessing a type: guessing `Bot` would skip a real human as "not a human" and
           # point the commenter at allowed-bots.
           #
           # `actor_lookup` records whether that type was actually CONFIRMED by an answer, because
