@@ -80,7 +80,7 @@ jobs:
 
 Result: Dependabot PRs produce no code-review run whatsoever. Not a skipped job, not a green no-op — the workflow's job-level `if:` is false, so GitHub never provisions a runner. Nothing appears on the pull request.
 
-And when you *do* want one — a lockfile bump that touches something load-bearing, a major version jump worth a look — you just comment `@claude review` on the Dependabot PR yourself. That is the ordinary path, not a workaround: the requester is you, a human with write access, so the reusable's actor gate passes on your association and the review runs against the PR head.
+And when you *do* want one — a lockfile bump that touches something load-bearing, a major version jump worth a look — you just comment `@claude review` on the Dependabot PR yourself. That is the ordinary path, not a workaround: the requester is you, a human with write access, so the reusable's actor gate confirms that permission and the review runs against the PR head.
 
 Two gates that used to matter here are now mostly historical:
 

@@ -446,32 +446,142 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         # The comment author must be human (or an allowed bot) AND have write access. Both
         # checks pre-empt a hard red failure inside claude-code-action, turning it into a green
-        # skip. `author_association` is a deliberate approximation of write access — see
-        # docs/architecture.md#four-gates-all-skipping-green for both failure modes and the
-        # caveat before changing either check.
+        # skip. Write access is read from the collaborator permission API, the same call and the
+        # same admin/write rule the action applies, so the two always agree. See
+        # docs/architecture.md#four-gates-all-skipping-green before changing either check.
         env:
           GH_TOKEN: ${{ github.token }}
           ALLOWED_BOTS: ${{ inputs.allowed-bots }}
-          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
         run: |
           normalize() {
             printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\[bot\]$//'
           }
 
-          # A 404 means a GitHub App actor with no backing user account, which the action also
-          # treats as a bot. A transient API failure lands here too and skips the review rather
-          # than failing the pull request — green is the safe direction for an advisory job.
+          # gh_lookup WHAT PATH JQ: one GitHub API read, used for both lookups below. These are
+          # network calls, so a 5xx, a 429 or a network error is retried: 3 attempts in all, 5 s
+          # apart (like resolve-preview-site.sh). Any other 4xx will not change on retry and stops
+          # at once. So do both rate limits: an exhausted primary one only clears when the hourly
+          # quota resets, and GitHub asks a client hitting a secondary one to wait at least a
+          # minute, longer than the retries would. An empty answer, or the `null` that --jq
+          # prints for a missing field, is not an answer and is retried like a 5xx. Sets
+          # `lookup_value` and `lookup_result` (ok | refused | rate-limited | throttled | failed),
+          # and `lookup_http` (the status gh reported, if any). The caller may then turn
+          # `refused` with HTTP 404 into `not-found`, the one other value lookup_skip handles.
+          # Always returns 0: the caller decides, and `bash -e` must not end the step here.
           #
-          # `actor_lookup` records whether that type was actually CONFIRMED, because "skips the
-          # review" only holds while allowed-bots is empty or an explicit list. The '*' branch
-          # below exempts the actor from the write-access check, so an unverified type must never
-          # reach it: otherwise one API blip turns any commenter into a bot, and '*' hands them an
+          # Each try's stderr goes to `lookup_try_err` and is classified from there. It is copied
+          # into `lookup_err` only when non-empty, so `lookup_err` keeps the last error gh actually
+          # printed: a 502 on tries 1-2 followed by an empty answer on try 3 still reaches the log.
+          lookup_err=$(mktemp)
+          lookup_try_err=$(mktemp)
+          # The step sets no other EXIT trap.
+          trap 'rm -f "$lookup_err" "$lookup_try_err"' EXIT
+          # Only so the tests can set the delay between retries to 0; callers never set it. Anything
+          # but a plain non-negative integer falls back to 5, so a bad value cannot make `sleep`
+          # fail the step red under `bash -e`.
+          lookup_retry_seconds=${LOOKUP_RETRY_SECONDS:-5}
+          if ! [[ "$lookup_retry_seconds" =~ ^[0-9]+$ ]]; then
+            lookup_retry_seconds=5
+          fi
+          gh_lookup() {
+            local try
+            lookup_value=''
+            lookup_result=failed
+            lookup_http=''
+            : >"$lookup_err"
+            for try in 1 2 3; do
+              if lookup_value=$(gh api "$2" --jq "$3" 2>"$lookup_try_err") && [ -n "$lookup_value" ] && [ "$lookup_value" != null ]; then
+                lookup_result=ok
+                return 0
+              fi
+              lookup_value=''
+              if [ -s "$lookup_try_err" ]; then
+                cp "$lookup_try_err" "$lookup_err"
+              fi
+              lookup_http=$(grep -oE 'HTTP [0-9]{3}' "$lookup_try_err" | tail -n 1 | sed 's/^HTTP //' || true)
+              if grep -qi 'secondary rate limit' "$lookup_try_err"; then
+                lookup_result=throttled
+                return 0
+              elif grep -qi 'API rate limit exceeded' "$lookup_try_err"; then
+                lookup_result=rate-limited
+                return 0
+              elif [ "$lookup_http" != 429 ] && [ "${lookup_http#4}" != "$lookup_http" ]; then
+                lookup_result=refused
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then
+                echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s $1 failed; retry ${try}/2 in ${lookup_retry_seconds} s."
+                sleep "$lookup_retry_seconds"
+              fi
+            done
+            return 0
+          }
+
+          # Prints what the last failed gh_lookup got, then the skip notice for it, and records
+          # eligible=false. The last error gh printed on any try is shown either way: the notice
+          # alone cannot tell a blip from a refusal. When the final try exited 0 with no value,
+          # that is said too, so an earlier 502 is not mistaken for the final answer. gh starts its
+          # messages with `gh: `; that is replaced by ours, which also keeps any line of gh's output
+          # from starting with `::` and being read as a command.
+          lookup_skip() { # WHAT
+            local reset wait
+            if [ -s "$lookup_err" ]; then
+              sed 's/^gh: //; s/^/[code-review] gh: /' "$lookup_err"
+            fi
+            if ! [ -s "$lookup_try_err" ]; then
+              echo "[code-review] gh returned an empty or null $1 for ${GITHUB_ACTOR}."
+            fi
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            case "$lookup_result" in
+              not-found)
+                echo "::notice::[code-review] skipped: GitHub has no account named ${GITHUB_ACTOR} (error above); it was most likely deleted or renamed after the comment. Post the trigger phrase again from the current account."
+                ;;
+              refused)
+                echo "::notice::[code-review] skipped: GitHub refused to look up ${GITHUB_ACTOR}'s $1 (error above). Retrying the trigger phrase will not change that."
+                ;;
+              rate-limited)
+                # /rate_limit does not count against the quota. Any doubt about its answer falls
+                # back to the upper bound: the primary quota resets hourly.
+                wait='within the hour'
+                reset=$(gh api rate_limit --jq .resources.core.reset 2>/dev/null || true)
+                if [[ "$reset" =~ ^[0-9]+$ ]] && [ "$reset" -gt "$(date +%s)" ]; then
+                  wait="in about $(( (reset - $(date +%s) + 59) / 60 )) min"
+                fi
+                echo "::notice::[code-review] skipped: the GitHub API rate limit of this repository's token is exhausted, so ${GITHUB_ACTOR}'s $1 could not be looked up. It resets ${wait}; retrying before then will fail the same way. Post the trigger phrase again after the reset."
+                ;;
+              throttled)
+                echo "::notice::[code-review] skipped: GitHub's secondary rate limit refused to look up ${GITHUB_ACTOR}'s $1 (error above). It clears on its own after a short wait: post the trigger phrase again in a few minutes."
+                ;;
+              *)
+                echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s $1 after 3 tries (last error above). Retry the trigger phrase."
+                ;;
+            esac
+          }
+
+          # A 404 for a login ending in `[bot]` means a GitHub App actor with no backing user
+          # account, which the action also treats as a bot. A 404 for any other login is a
+          # deleted or renamed account, not an app, so it skips like every other failure, with
+          # its own message saying so. Skipping (green is the safe direction for an advisory job)
+          # beats guessing a type: guessing `Bot` would skip a real human as "not a human" and
+          # point the commenter at allowed-bots.
+          #
+          # `actor_lookup` records whether that type was actually CONFIRMED by an answer, because
+          # the '*' branch below exempts the actor from the write-access check, so a type inferred
+          # from a 404 must never reach it: '*' would then hand any account GitHub cannot find an
           # eligible run holding this repository's secrets.
-          if actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null) && [ -n "$actor_type" ]; then
+          gh_lookup 'account type' "users/${GITHUB_ACTOR}" .type
+          if [ "$lookup_result" = ok ]; then
             actor_lookup=confirmed
-          else
+            actor_type=$lookup_value
+          elif [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ] && [[ "$GITHUB_ACTOR" == *'[bot]' ]]; then
             actor_lookup=unconfirmed
             actor_type='Bot'
+          else
+            if [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ]; then
+              lookup_result=not-found
+            fi
+            lookup_skip 'account type'
+            exit 0
           fi
 
           if [ "$actor_type" != 'User' ]; then
@@ -507,7 +617,7 @@ jobs:
 
             if [ "$allowed" != true ]; then
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means the account lookup itself failed — retry the trigger phrase before changing any input."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means GitHub has no user account by that name (a GitHub App), so allowed-bots must name it: '*' does not cover it."
               exit 0
             fi
 
@@ -517,13 +627,30 @@ jobs:
             exit 0
           fi
 
-          case "$AUTHOR_ASSOCIATION" in
-            OWNER | MEMBER | COLLABORATOR)
+          # The legacy `permission` field, not `role_name`: it folds maintain into write and triage
+          # into read, which is exactly what claude-code-action's own check compares against.
+          # `github.token` can always make this call: GitHub's "Permissions required for GitHub
+          # Apps" page lists it under Metadata: read for installation tokens. A failed
+          # lookup skips rather than grants: unlike the account-type 404 above, there is no
+          # safe value to assume here.
+          #
+          # The old author_association check read the event payload and could not fail; this is a
+          # network call, so gh_lookup retries what may pass on a retry before a legitimate
+          # request is skipped.
+          gh_lookup 'permission on this repository' "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" .permission
+          if [ "$lookup_result" != ok ]; then
+            lookup_skip 'permission on this repository'
+            exit 0
+          fi
+          permission=$lookup_value
+
+          case "$permission" in
+            admin | write)
               echo "eligible=true" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR}, whose association with this repository is ${AUTHOR_ASSOCIATION:-NONE}. Requesting a review requires write access."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR}, whose permission on this repository is ${permission}. Requesting a review requires write access."
               ;;
           esac
         shell: bash
