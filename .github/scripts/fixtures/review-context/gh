@@ -5,11 +5,11 @@
 #
 # Fixture name: stacks | siblings | head_<head param, every non-alphanumeric as `_`> | graphql
 # (any `gh api graphql ...`) | deployments | statuses | pr_comment (`gh pr comment`) | user
-# (`users/<login>`) | permission (`repos/.../collaborators/<login>/permission`).
+# (`users/<login>`) | permission (`repos/.../collaborators/<login>/permission`) | rate_limit.
 # It ignores `--jq`: a fixture for a call made with `--jq` holds the filtered value, not the JSON.
 # <name>.out is printed (default `[]`, or for graphql a response with no closing issues);
 # <name>.rc is the exit code (default 0), and <name>.err the error printed with it (default
-# `gh: HTTP <rc>`). <name>.<n>.out and <name>.<n>.rc, when present, answer the n-th call to that
+# `gh: HTTP <rc>`). <name>.<n>.out, <name>.<n>.rc and <name>.<n>.err, when present, answer the n-th call to that
 # name instead, so a test can script a sequence (pending, pending, then success; 502, then 200).
 # `gh pr comment` also appends its `--body` value to pr_comment.body, one body per call. Like the
 # real gh outside a git checkout, which is where the workflow's steps run, it fails unless the
@@ -17,7 +17,7 @@
 printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
 path=""
 for a in "$@"; do
-  case "$a" in repos/* | users/*) path=$a ;; esac
+  case "$a" in repos/* | users/* | rate_limit) path=$a ;; esac
 done
 if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
   path=graphql
@@ -48,6 +48,7 @@ case "$path" in
   */deployments/*/statuses*) name=statuses ;;
   */deployments\?*) name=deployments ;;
   users/*) name=user ;;
+  rate_limit) name=rate_limit ;;
   */collaborators/*/permission) name=permission ;;
   */pulls\?*base=*) name=siblings ;;
   */pulls\?*head=*)
@@ -75,7 +76,9 @@ rcfile="$STUB_DIR/$name.$n.rc"
 if [ -f "$rcfile" ]; then
   rc=$(cat "$rcfile")
   if [ "$rc" != 0 ]; then
-    if [ -f "$STUB_DIR/$name.err" ]; then cat "$STUB_DIR/$name.err" >&2; else echo "gh: HTTP $rc" >&2; fi
+    errfile="$STUB_DIR/$name.$n.err"
+    [ -f "$errfile" ] || errfile="$STUB_DIR/$name.err"
+    if [ -f "$errfile" ]; then cat "$errfile" >&2; else echo "gh: HTTP $rc" >&2; fi
   fi
   exit "$rc"
 fi

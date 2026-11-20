@@ -457,20 +457,94 @@ jobs:
             printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\[bot\]$//'
           }
 
+          # gh_lookup WHAT PATH JQ: one GitHub API read, used for both lookups below. These are
+          # network calls, so a 5xx, a 429, a secondary rate limit or a network error is retried:
+          # 3 attempts in all, 5 s apart (like resolve-preview-site.sh). Any other 4xx will not
+          # change on retry and stops at once, and so does an exhausted primary rate limit, which
+          # only clears when the hourly quota resets. Sets `lookup_value` and `lookup_result`
+          # (ok | refused | rate-limited | failed), and `lookup_http` (the status gh reported, if
+          # any). Always returns 0: the caller decides, and `bash -e` must not end the step here.
+          lookup_err=$(mktemp)
+          gh_lookup() {
+            local try
+            lookup_value=''
+            lookup_result=failed
+            lookup_http=''
+            for try in 1 2 3; do
+              if lookup_value=$(gh api "$2" --jq "$3" 2>"$lookup_err") && [ -n "$lookup_value" ]; then
+                lookup_result=ok
+                return 0
+              fi
+              lookup_value=''
+              lookup_http=$(grep -oE 'HTTP [0-9]{3}' "$lookup_err" | tail -n 1 | sed 's/^HTTP //' || true)
+              if grep -qi 'secondary rate limit' "$lookup_err"; then
+                :
+              elif grep -qi 'API rate limit exceeded' "$lookup_err"; then
+                lookup_result=rate-limited
+                return 0
+              elif [ "$lookup_http" != 429 ] && [ "${lookup_http#4}" != "$lookup_http" ]; then
+                lookup_result=refused
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then
+                echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s $1 failed; retry ${try}/2 in ${PERMISSION_RETRY_SECONDS:-5} s."
+                sleep "${PERMISSION_RETRY_SECONDS:-5}"
+              fi
+            done
+            return 0
+          }
+
+          # Prints what the last failed gh_lookup got, then the skip notice for it, and records
+          # eligible=false. gh's error is printed either way: the notice alone cannot tell a blip
+          # from a refusal. gh starts its messages with `gh: `; that is replaced by ours, which
+          # also keeps any line of gh's output from starting with `::` and being read as a command.
+          lookup_skip() { # WHAT
+            local reset wait
+            if [ -s "$lookup_err" ]; then
+              sed 's/^gh: //; s/^/[code-review] gh: /' "$lookup_err"
+            else
+              echo "[code-review] gh returned an empty $1 for ${GITHUB_ACTOR}."
+            fi
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            case "$lookup_result" in
+              refused)
+                echo "::notice::[code-review] skipped: GitHub refused to look up ${GITHUB_ACTOR}'s $1 (error above). Retrying the trigger phrase will not change that."
+                ;;
+              rate-limited)
+                # /rate_limit does not count against the quota. Any doubt about its answer falls
+                # back to the upper bound: the primary quota resets hourly.
+                wait='within the hour'
+                reset=$(gh api rate_limit --jq .resources.core.reset 2>/dev/null || true)
+                if [[ "$reset" =~ ^[0-9]+$ ]] && [ "$reset" -gt "$(date +%s)" ]; then
+                  wait="in about $(( (reset - $(date +%s) + 59) / 60 )) min"
+                fi
+                echo "::notice::[code-review] skipped: the GitHub API rate limit of this repository's token is exhausted, so ${GITHUB_ACTOR}'s $1 could not be looked up. It resets ${wait}; retrying before then will fail the same way. Post the trigger phrase again after the reset."
+                ;;
+              *)
+                echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s $1 after 3 tries (last error above). Retry the trigger phrase."
+                ;;
+            esac
+          }
+
           # A 404 means a GitHub App actor with no backing user account, which the action also
-          # treats as a bot. A transient API failure lands here too and skips the review rather
-          # than failing the pull request — green is the safe direction for an advisory job.
+          # treats as a bot. Any other failure skips the review (green is the safe direction for
+          # an advisory job) instead of guessing a type: guessing `Bot` would skip a real human
+          # as "not a human" and point the commenter at allowed-bots.
           #
-          # `actor_lookup` records whether that type was actually CONFIRMED, because "skips the
-          # review" only holds while allowed-bots is empty or an explicit list. The '*' branch
-          # below exempts the actor from the write-access check, so an unverified type must never
-          # reach it: otherwise one API blip turns any commenter into a bot, and '*' hands them an
+          # `actor_lookup` records whether that type was actually CONFIRMED by an answer, because
+          # the '*' branch below exempts the actor from the write-access check, so a type inferred
+          # from a 404 must never reach it: '*' would then hand any account GitHub cannot find an
           # eligible run holding this repository's secrets.
-          if actor_type=$(gh api "users/${GITHUB_ACTOR}" --jq .type 2>/dev/null) && [ -n "$actor_type" ]; then
+          gh_lookup 'account type' "users/${GITHUB_ACTOR}" .type
+          if [ "$lookup_result" = ok ]; then
             actor_lookup=confirmed
-          else
+            actor_type=$lookup_value
+          elif [ "$lookup_result" = refused ] && [ "$lookup_http" = 404 ]; then
             actor_lookup=unconfirmed
             actor_type='Bot'
+          else
+            lookup_skip 'account type'
+            exit 0
           fi
 
           if [ "$actor_type" != 'User' ]; then
@@ -506,7 +580,7 @@ jobs:
 
             if [ "$allowed" != true ]; then
               echo "eligible=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means the account lookup itself failed — retry the trigger phrase before changing any input."
+              echo "::notice::[code-review] skipped: review requested by ${GITHUB_ACTOR} (account type: ${actor_type}, ${actor_lookup}), not a human. Set the allowed-bots input to honour this bot's requests. An 'unconfirmed' type means GitHub has no user account by that name (a GitHub App), so allowed-bots must name it: '*' does not cover it."
               exit 0
             fi
 
@@ -520,43 +594,18 @@ jobs:
           # into read, which is exactly what claude-code-action's own check compares against.
           # `github.token` can always make this call: GitHub's "Permissions required for GitHub
           # Apps" page lists it under Metadata: read for installation tokens. A failed
-          # lookup skips rather than grants: unlike the account-type lookup above, there is no
+          # lookup skips rather than grants: unlike the account-type 404 above, there is no
           # safe value to assume here.
           #
           # The old author_association check read the event payload and could not fail; this is a
-          # network call, so a 5xx or a rate limit is retried (3 tries, like resolve-preview-site.sh)
-          # before a legitimate request is skipped. A 403 or 404 will not change on retry, so it
-          # stops at once. gh's error is printed either way: the notice alone cannot tell a blip
-          # from a refusal.
-          perm_err=$(mktemp)
-          permission=''
-          refused=false
-          for try in 1 2 3; do
-            if permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" --jq .permission 2>"$perm_err") && [ -n "$permission" ]; then
-              break
-            fi
-            permission=''
-            if ! grep -qi 'rate limit' "$perm_err" && grep -qE 'HTTP 40[34]([^0-9]|$)' "$perm_err"; then
-              refused=true
-              break
-            fi
-            if [ "$try" -lt 3 ]; then
-              echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s permission failed; retry ${try}/2 in ${PERMISSION_RETRY_SECONDS:-5} s."
-              sleep "${PERMISSION_RETRY_SECONDS:-5}"
-            fi
-          done
-
-          if [ -z "$permission" ]; then
-            # Prefixed so no line of gh's output can start with `::` and be read as a command.
-            sed 's/^/[code-review] gh: /' "$perm_err"
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            if [ "$refused" = true ]; then
-              echo "::notice::[code-review] skipped: GitHub refused to look up ${GITHUB_ACTOR}'s permission on this repository (error above). Retrying the trigger phrase will not change that."
-            else
-              echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s permission on this repository after 3 tries (last error above). Retry the trigger phrase."
-            fi
+          # network call, so gh_lookup retries what may pass on a retry before a legitimate
+          # request is skipped.
+          gh_lookup 'permission on this repository' "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" .permission
+          if [ "$lookup_result" != ok ]; then
+            lookup_skip 'permission on this repository'
             exit 0
           fi
+          permission=$lookup_value
 
           case "$permission" in
             admin | write)

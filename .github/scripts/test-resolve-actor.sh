@@ -5,8 +5,10 @@
 # against the stub `gh` in fixtures/review-context/. Nothing here talks to the network.
 #
 # The write-access half must agree with claude-code-action's own check: the collaborator
-# permission API, `admin` or `write` in the legacy `permission` field. A failed lookup is retried
-# (PERMISSION_RETRY_SECONDS, 0 here) unless GitHub refused it outright.
+# permission API, `admin` or `write` in the legacy `permission` field. Both lookups (account type
+# and permission) share one helper: a 5xx, 429 or secondary rate limit is retried (3 attempts,
+# PERMISSION_RETRY_SECONDS apart, 0 here); any other 4xx and an exhausted primary rate limit stop
+# at once.
 #
 # Usage:
 #   ./.github/scripts/test-resolve-actor.sh                 # every case
@@ -81,6 +83,13 @@ permission_calls() { # expected number of permission lookups
   [ "$got" -eq "$1" ]
   check "looked up the permission $1 time(s) (got $got)" $?
 }
+user_calls() { # expected number of account-type lookups
+  local got
+  got=$(grep -c '^api users/' "$STUB_DIR/calls.log")
+  [ "$got" -eq "$1" ]
+  check "looked up the account type $1 time(s) (got $got)" $?
+}
+never_says() { ! printf '%s' "$ERR" | grep -qF -- "$1"; check "output does not contain: $1 (got: $ERR)" $?; }
 never_asked_permission() {
   ! grep -q '/permission' "$STUB_DIR/calls.log"
   local rc=$?
@@ -97,15 +106,18 @@ case_read() {
   says "whose permission on this repository is read"; says "requires write access"
 }
 case_none() { fx permission none; run_step; expect_ok; expect_eligible false; asked_permission alice; says "is none"; }
+# Exit 0 with nothing printed: retried, and the log says what gh returned instead of pointing at
+# an error that is not there.
 case_empty() {
   fx permission ''; run_step; expect_ok; expect_eligible false; asked_permission alice
-  permission_calls 3; says "could not look up alice's permission"; says "Retry the trigger phrase"
+  permission_calls 3; says "[code-review] gh returned an empty permission on this repository for alice."
+  says "could not look up alice's permission"; says "Retry the trigger phrase"
 }
-# A transient failure is retried three times, and gh's error reaches the log.
+# A transient failure gets 3 attempts in all, and gh's error reaches the log under one prefix.
 case_lookup_fails() {
   fxrc permission 1; fxerr permission 'gh: Bad Gateway (HTTP 502)'
   run_step; expect_ok; expect_eligible false; asked_permission alice; permission_calls 3
-  says "retry 1/2"; says "retry 2/2"; says "[code-review] gh: gh: Bad Gateway (HTTP 502)"
+  says "retry 1/2"; says "retry 2/2"; says "[code-review] gh: Bad Gateway (HTTP 502)"; never_says "gh: gh:"
   says "could not look up alice's permission"; says "Retry the trigger phrase"
 }
 # One blip, then an answer: the review runs.
@@ -113,16 +125,62 @@ case_lookup_recovers() {
   fxrc permission.1 1; fx permission write
   run_step; expect_ok; expect_eligible true; asked_permission alice; permission_calls 2; says "retry 1/2"
 }
-# A rate limit is a 403 too, but it passes: it is retried like a 5xx.
+# The primary quota only clears at its hourly reset: no retry, and no advice to retry now.
 case_rate_limited() {
-  fxrc permission 1; fxerr permission 'gh: API rate limit exceeded (HTTP 403)'
-  run_step; expect_ok; expect_eligible false; permission_calls 3; says "Retry the trigger phrase"
+  fxrc permission 1; fxerr permission 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)'
+  run_step; expect_ok; expect_eligible false; permission_calls 1; never_says "retry 1/2"
+  says "rate limit of this repository's token is exhausted"; says "resets within the hour"
+  never_says "Retry the trigger phrase"
+}
+# When /rate_limit answers with a reset time ahead, the notice gives it.
+case_rate_limited_reset() {
+  fxrc permission 1; fxerr permission 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)'
+  fx rate_limit "$(( $(date +%s) + 600 ))"
+  run_step; expect_ok; expect_eligible false; permission_calls 1; says "resets in about 10 min"
+}
+# A secondary rate limit is a 403 too, but it passes: it is retried like a 5xx.
+case_secondary_rate_limited() {
+  fxrc permission.1 1; fxerr permission.1 'gh: You have exceeded a secondary rate limit. (HTTP 403)'
+  fx permission write
+  run_step; expect_ok; expect_eligible true; permission_calls 2; says "retry 1/2"
+}
+case_too_many_requests() {
+  fxrc permission 1; fxerr permission 'gh: Too Many Requests (HTTP 429)'
+  run_step; expect_ok; expect_eligible false; permission_calls 3; says "retry 2/2"
+  says "Retry the trigger phrase"
 }
 # A refusal will not change on retry: one call, the error, and no advice to retry.
 case_lookup_refused() {
   fxrc permission 1; fxerr permission 'gh: Not Found (HTTP 404)'
   run_step; expect_ok; expect_eligible false; asked_permission alice; permission_calls 1
-  says "[code-review] gh: gh: Not Found (HTTP 404)"; says "will not change that"
+  says "[code-review] gh: Not Found (HTTP 404)"; never_says "gh: gh:"; says "will not change that"
+  never_says "Retry the trigger phrase"
+}
+# Every 4xx but 429 is final, not just 403 and 404.
+case_unauthorized() {
+  fxrc permission 1; fxerr permission 'gh: Bad credentials (HTTP 401)'
+  run_step; expect_ok; expect_eligible false; permission_calls 1; never_says "retry 1/2"
+  says "[code-review] gh: Bad credentials (HTTP 401)"; says "will not change that"
+  never_says "Retry the trigger phrase"
+}
+
+# The account-type lookup goes through the same helper.
+case_user_lookup_recovers() {
+  fxrc user.1 1; fxerr user.1 'gh: Bad Gateway (HTTP 502)'; fx permission write
+  run_step; expect_ok; expect_eligible true; user_calls 2; says "looking up alice's account type failed; retry 1/2"
+  asked_permission alice
+}
+# A human is never classified a bot because the lookup failed: the run skips with the reason.
+case_user_lookup_fails() {
+  fxrc user 1; fxerr user 'gh: Bad Gateway (HTTP 502)'
+  run_step; expect_ok; expect_eligible false; user_calls 3; never_asked_permission
+  says "[code-review] gh: Bad Gateway (HTTP 502)"; says "could not look up alice's account type after 3 tries"
+  says "Retry the trigger phrase"; never_says "not a human"
+}
+case_user_lookup_refused() {
+  fxrc user 1; fxerr user 'gh: Bad credentials (HTTP 401)'
+  run_step; expect_ok; expect_eligible false; user_calls 1; never_asked_permission
+  says "refused to look up alice's account type"; never_says "not a human"
 }
 
 # The bot branch is unchanged by the permission lookup: an allowed bot is exempt, like in the
@@ -139,14 +197,26 @@ case_self_trigger() {
   export GITHUB_ACTOR='claude[bot]' ALLOWED_BOTS='*'
   fx user Bot; run_step; expect_ok; expect_eligible false; never_asked_permission; says "its own review"
 }
+# A 404 is a GitHub App with no user account: a bot, but unconfirmed, so '*' does not cover it
+# while a list naming it does.
 case_unconfirmed_wildcard() {
-  export ALLOWED_BOTS='*'
-  fxrc user 1; run_step; expect_ok; expect_eligible false; never_asked_permission; says "unconfirmed"
+  export GITHUB_ACTOR='some-app[bot]' ALLOWED_BOTS='*'
+  fxrc user 1; fxerr user 'gh: Not Found (HTTP 404)'
+  run_step; expect_ok; expect_eligible false; user_calls 1; never_asked_permission; says "unconfirmed"
+  says "not a human"
+}
+case_unconfirmed_listed() {
+  export GITHUB_ACTOR='some-app[bot]' ALLOWED_BOTS='some-app'
+  fxrc user 1; fxerr user 'gh: Not Found (HTTP 404)'
+  run_step; expect_ok; expect_eligible true; never_asked_permission
 }
 
 # --- runner ----------------------------------------------------------------------------------
 
-ALL=(admin write read none empty lookup_fails lookup_recovers rate_limited lookup_refused allowed_bot unlisted_bot self_trigger unconfirmed_wildcard)
+ALL=(admin write read none empty lookup_fails lookup_recovers rate_limited rate_limited_reset
+  secondary_rate_limited too_many_requests lookup_refused unauthorized user_lookup_recovers
+  user_lookup_fails user_lookup_refused allowed_bot unlisted_bot self_trigger unconfirmed_wildcard
+  unconfirmed_listed)
 [ $# -gt 0 ] && ALL=("$@")
 
 failed=()
