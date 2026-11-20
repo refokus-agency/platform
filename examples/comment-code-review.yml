@@ -35,5 +35,5 @@ permissions:
 
 jobs:
   code-review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1 # x-release-please-major
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v2 # x-release-please-major
     secrets: inherit
