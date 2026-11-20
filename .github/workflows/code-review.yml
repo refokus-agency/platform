@@ -404,9 +404,39 @@ jobs:
           # Apps" page lists it under Metadata: read for installation tokens. A failed
           # lookup skips rather than grants: unlike the account-type lookup above, there is no
           # safe value to assume here.
-          if ! permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" --jq .permission 2>/dev/null) || [ -z "$permission" ]; then
+          #
+          # The old author_association check read the event payload and could not fail; this is a
+          # network call, so a 5xx or a rate limit is retried (3 tries, like resolve-preview-site.sh)
+          # before a legitimate request is skipped. A 403 or 404 will not change on retry, so it
+          # stops at once. gh's error is printed either way: the notice alone cannot tell a blip
+          # from a refusal.
+          perm_err=$(mktemp)
+          permission=''
+          refused=false
+          for try in 1 2 3; do
+            if permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" --jq .permission 2>"$perm_err") && [ -n "$permission" ]; then
+              break
+            fi
+            permission=''
+            if ! grep -qi 'rate limit' "$perm_err" && grep -qE 'HTTP 40[34]([^0-9]|$)' "$perm_err"; then
+              refused=true
+              break
+            fi
+            if [ "$try" -lt 3 ]; then
+              echo "::warning::[code-review] looking up ${GITHUB_ACTOR}'s permission failed; retry ${try}/2 in ${PERMISSION_RETRY_SECONDS:-5} s."
+              sleep "${PERMISSION_RETRY_SECONDS:-5}"
+            fi
+          done
+
+          if [ -z "$permission" ]; then
+            # Prefixed so no line of gh's output can start with `::` and be read as a command.
+            sed 's/^/[code-review] gh: /' "$perm_err"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s permission on this repository. Retry the trigger phrase."
+            if [ "$refused" = true ]; then
+              echo "::notice::[code-review] skipped: GitHub refused to look up ${GITHUB_ACTOR}'s permission on this repository (error above). Retrying the trigger phrase will not change that."
+            else
+              echo "::notice::[code-review] skipped: could not look up ${GITHUB_ACTOR}'s permission on this repository after 3 tries (last error above). Retry the trigger phrase."
+            fi
             exit 0
           fi
 

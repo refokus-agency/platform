@@ -5,7 +5,8 @@
 # against the stub `gh` in fixtures/resolve-actor/. Nothing here talks to the network.
 #
 # The write-access half must agree with claude-code-action's own check: the collaborator
-# permission API, `admin` or `write` in the legacy `permission` field.
+# permission API, `admin` or `write` in the legacy `permission` field. A failed lookup is retried
+# (PERMISSION_RETRY_SECONDS, 0 here) unless GitHub refused it outright.
 #
 # Usage:
 #   ./.github/scripts/test-resolve-actor.sh                 # every case
@@ -36,13 +37,13 @@ setup() {
   mkdir -p "$STUB_DIR"
   : >"$STUB_DIR/calls.log"
   export GITHUB_REPOSITORY=acme/app GH_TOKEN=x GITHUB_ACTOR=alice ALLOWED_BOTS=''
-  # The association says nothing about permission level: every case must be decided by the
-  # permission lookup alone, whatever this says.
-  export AUTHOR_ASSOCIATION=COLLABORATOR
+  # The step retries a failed lookup; no case should wait for it.
+  export PERMISSION_RETRY_SECONDS=0
   fx user User
 }
 fx() { printf '%s' "$2" >"$STUB_DIR/$1.out"; }
 fxrc() { printf '%s' "$2" >"$STUB_DIR/$1.rc"; }
+fxerr() { printf '%s\n' "$2" >"$STUB_DIR/$1.err"; }
 
 # Runs the step's `run:`. ELIGIBLE: the `eligible` output it wrote, ERR: its stdout and stderr,
 # RC: exit code.
@@ -69,10 +70,16 @@ expect_eligible() {
 }
 says() { printf '%s' "$ERR" | grep -qF -- "$1"; check "output contains: $1 (got: $ERR)" $?; }
 asked_permission() {
-  # `$?` is saved first: the command substitution in check's message would otherwise reset it.
   grep -qxF "api repos/acme/app/collaborators/${1}/permission --jq .permission" "$STUB_DIR/calls.log"
+  # Saved first: the command substitution in check's message would reset $? before it is read.
   local rc=$?
   check "looked up ${1}'s permission on acme/app (calls: $(tr '\n' ';' <"$STUB_DIR/calls.log"))" "$rc"
+}
+permission_calls() { # expected number of permission lookups
+  local got
+  got=$(grep -c '/permission' "$STUB_DIR/calls.log")
+  [ "$got" -eq "$1" ]
+  check "looked up the permission $1 time(s) (got $got)" $?
 }
 never_asked_permission() {
   ! grep -q '/permission' "$STUB_DIR/calls.log"
@@ -86,17 +93,36 @@ case_admin() { fx permission admin; run_step; expect_ok; expect_eligible true; a
 # maintain arrives as `write` in the legacy field, so this case covers it too.
 case_write() { fx permission write; run_step; expect_ok; expect_eligible true; asked_permission alice; }
 case_read() {
-  fx permission read; run_step; expect_ok; expect_eligible false
+  fx permission read; run_step; expect_ok; expect_eligible false; asked_permission alice
   says "whose permission on this repository is read"; says "requires write access"
 }
-case_none() { fx permission none; run_step; expect_ok; expect_eligible false; says "is none"; }
+case_none() { fx permission none; run_step; expect_ok; expect_eligible false; asked_permission alice; says "is none"; }
 case_empty() {
-  fx permission ''; run_step; expect_ok; expect_eligible false
+  fx permission ''; run_step; expect_ok; expect_eligible false; asked_permission alice
+  permission_calls 3; says "could not look up alice's permission"; says "Retry the trigger phrase"
+}
+# A transient failure is retried three times, and gh's error reaches the log.
+case_lookup_fails() {
+  fxrc permission 1; fxerr permission 'gh: Bad Gateway (HTTP 502)'
+  run_step; expect_ok; expect_eligible false; asked_permission alice; permission_calls 3
+  says "retry 1/2"; says "retry 2/2"; says "[code-review] gh: gh: Bad Gateway (HTTP 502)"
   says "could not look up alice's permission"; says "Retry the trigger phrase"
 }
-case_lookup_fails() {
-  fxrc permission 1; run_step; expect_ok; expect_eligible false
-  says "could not look up alice's permission"; says "Retry the trigger phrase"
+# One blip, then an answer: the review runs.
+case_lookup_recovers() {
+  fxrc permission.1 1; fx permission write
+  run_step; expect_ok; expect_eligible true; asked_permission alice; permission_calls 2; says "retry 1/2"
+}
+# A rate limit is a 403 too, but it passes: it is retried like a 5xx.
+case_rate_limited() {
+  fxrc permission 1; fxerr permission 'gh: API rate limit exceeded (HTTP 403)'
+  run_step; expect_ok; expect_eligible false; permission_calls 3; says "Retry the trigger phrase"
+}
+# A refusal will not change on retry: one call, the error, and no advice to retry.
+case_lookup_refused() {
+  fxrc permission 1; fxerr permission 'gh: Not Found (HTTP 404)'
+  run_step; expect_ok; expect_eligible false; asked_permission alice; permission_calls 1
+  says "[code-review] gh: gh: Not Found (HTTP 404)"; says "will not change that"
 }
 
 # The bot branch is unchanged by the permission lookup: an allowed bot is exempt, like in the
@@ -120,7 +146,7 @@ case_unconfirmed_wildcard() {
 
 # --- runner ----------------------------------------------------------------------------------
 
-ALL=(admin write read none empty lookup_fails allowed_bot unlisted_bot self_trigger unconfirmed_wildcard)
+ALL=(admin write read none empty lookup_fails lookup_recovers rate_limited lookup_refused allowed_bot unlisted_bot self_trigger unconfirmed_wildcard)
 [ $# -gt 0 ] && ALL=("$@")
 
 failed=()

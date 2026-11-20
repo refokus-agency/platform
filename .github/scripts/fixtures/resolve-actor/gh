@@ -5,7 +5,9 @@
 # Fixture name: user (`users/<login>`) | permission (`repos/.../collaborators/<login>/permission`).
 # It ignores `--jq`: a fixture for a call made with `--jq` holds the filtered value, not the JSON.
 # <name>.out is printed (default empty); <name>.rc is the exit code (default 0), and <name>.err
-# the error printed with it (default `gh: HTTP <rc>`). Any other call exits 99.
+# the error printed with it (default `gh: HTTP <rc>`). <name>.<n>.out and <name>.<n>.rc, when
+# present, answer the n-th call to that name instead, so a test can script a sequence (502, then
+# 200). Any other call exits 99.
 printf '%s\n' "$*" >> "$STUB_DIR/calls.log"
 path=""
 for a in "$@"; do
@@ -16,11 +18,17 @@ case "$path" in
   */collaborators/*/permission) name=permission ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 99 ;;
 esac
-if [ -f "$STUB_DIR/$name.out" ]; then
+n=$(( $(cat "$STUB_DIR/$name.count" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$n" > "$STUB_DIR/$name.count"
+if [ -f "$STUB_DIR/$name.$n.out" ]; then
+  cat "$STUB_DIR/$name.$n.out"
+elif [ -f "$STUB_DIR/$name.out" ]; then
   cat "$STUB_DIR/$name.out"
 fi
-if [ -f "$STUB_DIR/$name.rc" ]; then
-  rc=$(cat "$STUB_DIR/$name.rc")
+rcfile="$STUB_DIR/$name.$n.rc"
+[ -f "$rcfile" ] || rcfile="$STUB_DIR/$name.rc"
+if [ -f "$rcfile" ]; then
+  rc=$(cat "$rcfile")
   if [ "$rc" != 0 ]; then
     if [ -f "$STUB_DIR/$name.err" ]; then cat "$STUB_DIR/$name.err" >&2; else echo "gh: HTTP $rc" >&2; fi
   fi

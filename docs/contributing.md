@@ -195,6 +195,8 @@ The `Pin check` workflow runs that script on every pull request. It fails if a r
 
 If you change the script itself, `./.github/scripts/check-action-pins.sh --self-test` runs it against [`.github/scripts/fixtures/pin-check/`](../.github/scripts/fixtures/pin-check) and asserts it still rejects what it is supposed to reject. CI runs it too, before the real check.
 
+If you change the `Resolve actor` step in `code-review.yml` (who may request a review), run `./.github/scripts/test-resolve-actor.sh`. It stubs `gh` with [`.github/scripts/fixtures/resolve-actor/gh`](../.github/scripts/fixtures/resolve-actor/gh), so it needs no token or network, and the `Script tests` workflow runs it on every pull request. The step decides which commenters get a review in every caller, so add a case for any behaviour you change.
+
 **Bumps are Dependabot's job, not yours.** Dependabot updates the SHA and its version comment together, weekly, so its PRs pass the gate unmodified.
 
 One thing Dependabot can't do for you: it does not look inside `.github/actions/`. If you add a composite action there, it needs its own entry in `.github/dependabot.yml` or its pins freeze forever. You don't have to remember this — the `Composite actions have Dependabot coverage` job fails the PR and prints the block to paste. To check before pushing:
