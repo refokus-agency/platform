@@ -431,27 +431,27 @@ secrets:
 
 would be noisy and easy to miss when adding a new secret. `secrets: inherit` forwards everything the caller has access to, so adding a new secret is a one-line change in the reusable.
 
-**This is the default for callers inside `refokus-agency`**, where the caller and the reusables share maintainers. An external caller gets the same blanket forward — every secret it holds, declared or not — against a floating `@v1` tag it doesn't control, which is a materially different trade. Those callers should enumerate instead: see [secrets.md](secrets.md#calling-from-outside-refokus-agency).
+**This is the default for callers inside `refokus-agency`**, where the caller and the reusables share maintainers. An external caller gets the same blanket forward — every secret it holds, declared or not — against a floating `@v2` tag it doesn't control, which is a materially different trade. Those callers should enumerate instead: see [secrets.md](secrets.md#calling-from-outside-refokus-agency).
 
 Note that every declared secret is `required: false`. A secret declared as required fails the run at startup for every caller that hasn't configured it, so the reusables gate the steps that need a secret instead of demanding it up front.
 
 ### Versioning with release-please
 
-Callers reference the floating major tag `@v1`. Releases are automated by [release-please](https://github.com/googleapis/release-please-action):
+Callers reference the floating major tag of the current major, `@v2` (`@v1` is frozen at `v1.12.1`). Releases are automated by [release-please](https://github.com/googleapis/release-please-action):
 
 1. Conventional commits land on `main` (`feat:`, `fix:`, `chore:`, etc., with `feat!:` or `BREAKING CHANGE:` footer for breakers).
 2. release-please opens or updates a release PR aggregating unreleased commits, computing the next semver bump, and updating `CHANGELOG.md`.
-3. Merging the release PR tags the new version (`v1.x.y`), creates a GitHub Release, and the `release-please.yml` workflow force-moves `@v1` to the same commit.
+3. Merging the release PR tags the new version (`v2.x.y`), creates a GitHub Release, and the `release-please.yml` workflow force-moves `@v2` to the same commit.
 
 On a major bump the release PR also rewrites the `@vN` refs in `README.md` and in every `uses:` line of `examples/`, so new projects copy the new major the moment its tag exists. Each of those lines ends in `# x-release-please-major`, and each file is listed under `extra-files` in `release-please-config.json`. The marker replaces the first number on its line, so a `uses:` line must have no other digit before `@vN`. A new example file needs both the marker and an `extra-files` entry.
 
-Why a floating `@v1` instead of pinned `@v1.2.3` per caller?
+Why a floating `@v2` instead of pinned `@v2.3.4` per caller?
 
 - One tag to update means non-breaking improvements propagate without 10+ PRs per fix.
-- Breaking changes go to a new major (`@v2`); callers stay on `@v1` until they explicitly migrate.
+- Breaking changes go to a new major (`@v3`); callers stay on `@v2` until they explicitly migrate, as they did from `@v1` (see [migration.md → Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2)).
 - Repos that want bleeding-edge can still use `@main`; SHA pins (`@<sha>`) work for paranoid scenarios.
 
-The `v1.0.0` tag was bootstrapped manually on the first stable `main` HEAD; from `v1.1.0` onward release-please owns the process. The floating `@v1` is force-pushed on every release — that's the only place `--force` is acceptable.
+The `v1.0.0` tag was bootstrapped manually on the first stable `main` HEAD; from `v1.1.0` onward release-please owns the process. The floating major tag (`@v2` today) is force-pushed on every release — that's the only place `--force` is acceptable.
 
 ### Why does the composite action pass `--ignore-scripts` by default?
 
@@ -467,7 +467,7 @@ This default is especially important in the Dependabot flow (see `docs/dependabo
 
 A Git tag is a mutable pointer. `uses: actions/checkout@v7` does not name code — it names a label that the action's owner, or anyone who compromises their account, can repoint at any commit at any time, with no PR and no notification to you. That is not hypothetical: in March 2025, `tj-actions/changed-files` had every one of its tags retargeted at a commit that dumped runner memory — including CI secrets — into publicly readable build logs, across roughly 23,000 repositories ([CVE-2025-30066](https://nvd.nist.gov/vuln/detail/CVE-2025-30066)).
 
-This repo is a force multiplier for that failure. Consumers pin `refokus-agency/platform/...@v1`, and `v1` is force-moved to every release on the v1.x line (see [Versioning with release-please](#versioning-with-release-please)). A retargeted upstream tag reaches every Refokus project on the next run — no merge, no review, no version bump. The blast radius of a third-party action here is the whole org.
+This repo is a force multiplier for that failure. Consumers pin `refokus-agency/platform/...@v2`, and `v2` is force-moved to every release on the v2.x line (see [Versioning with release-please](#versioning-with-release-please)). A retargeted upstream tag reaches every Refokus project on the next run — no merge, no review, no version bump. The blast radius of a third-party action here is the whole org.
 
 So every third-party `uses:` under `.github/workflows/` and `.github/actions/` names an immutable commit SHA, with the human-readable version carried in a trailing comment:
 
@@ -487,7 +487,7 @@ pinact itself is not the problem and did not go away — it is still how pins ar
 
 The trade-off is that we maintain the check. That cost is bounded — the same trade this repo already took with [`check-dependabot-coverage.sh`](../.github/scripts/check-dependabot-coverage.sh) — and it buys a CI surface with no third-party code in it at all. The script carries a `--self-test` mode, run as its own CI step ahead of the real check, because a gate that has never been shown to fail is not a gate.
 
-**First-party `@v1` references in `examples/` stay floating, deliberately.** A consumer copies those caller files once and must keep receiving fixes without editing them; that is the entire point of the floating major tag, and we control the repo it points at. The threat model here is *someone else's* mutable tag, not our own. (Whether first-party callers should pin too is a separate question with a separate trade-off — [#60](https://github.com/refokus-agency/platform/issues/60).)
+**First-party `@v2` references in `examples/` stay floating, deliberately.** A consumer copies those caller files once and must keep receiving fixes without editing them; that is the entire point of the floating major tag, and we control the repo it points at. The threat model here is *someone else's* mutable tag, not our own. (Whether first-party callers should pin too is a separate question with a separate trade-off — [#60](https://github.com/refokus-agency/platform/issues/60).)
 
 This is a complement to an org-level allowed-actions policy, not a substitute: a policy decides *which* actions may run, a pin decides *which code* those actions are.
 
@@ -497,10 +497,10 @@ The composite action (`setup`) lives in `platform`. When a reusable runs, the wo
 
 Each reusable does a secondary checkout of `refokus-agency/platform` into `.platform/`, then references `./.platform/.github/actions/setup`. The `platform-ref` input controls which ref to check out, and defaults to `main`.
 
-**That default does not track the ref the caller pinned, and the two can drift.** A caller on `uses: ...@v1` runs the reusable's *definition* from the `v1` tag, but the secondary checkout takes whatever is on platform's `main` at run time — they are independent refs. Consequences worth knowing before you rely on a pin:
+**That default does not track the ref the caller pinned, and the two can drift.** A caller on `uses: ...@v2` runs the reusable's *definition* from the `v2` tag, but the secondary checkout takes whatever is on platform's `main` at run time — they are independent refs. Consequences worth knowing before you rely on a pin:
 
 - A caller pinned to a released tag picks up later changes to the checked-out files with no version bump.
-- Rolling `@v1` back to an earlier release does not roll back what the secondary checkout fetches.
+- Rolling `@v2` back to an earlier release does not roll back what the secondary checkout fetches.
 - If a file the reusable depends on is moved or deleted on `main`, pinned callers break without having changed anything.
 
 Set `platform-ref` explicitly when you need the reusable and the files it checks out to move together — in particular when pinning for reproducibility rather than for a rollback.

@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v2
     secrets: inherit
 ```
 
@@ -51,13 +51,13 @@ Dependabot can't access `VERCEL_TOKEN`, so the `deploy-preview` job in `pr-previ
 ```yaml
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v2
     secrets: inherit
 
   deploy-preview:
     needs: ci
     if: github.actor != 'dependabot[bot]'
-    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v2
     with:
       environment: preview
     secrets: inherit
@@ -74,7 +74,7 @@ Not a Dependabot problem at all any more, and worth understanding why the shape 
 ```yaml
 jobs:
   code-review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v2
     secrets: inherit
 ```
 

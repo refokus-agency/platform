@@ -2,6 +2,8 @@
 
 How to move an existing repo off its bespoke workflows and onto the centralized setup.
 
+> **Already on the centralized workflows and still on `@v1`?** You don't need most of this page. Go to [Upgrading from v1 to v2](#upgrading-from-v1-to-v2): `@v1` is frozen at `v1.12.1` and gets no more fixes.
+
 ## Before you start
 
 - Read [getting-started.md](getting-started.md) first for the mental model — this guide covers what's different when a repo already has workflows.
@@ -126,22 +128,87 @@ Don't leave a half-migrated state.
 
 ## Upgrading from v1 to v2
 
-Already on the centralized workflows and moving a caller from `@v1` to `@v2`.
+Already on the centralized workflows and moving a caller from `@v1` to `@v2`. The steps below are in order: find every reference, re-pin it, add the permissions, compare against `examples/`, then verify.
 
-### Re-pin every caller, not only the ones that changed
+### 1. Find every reference
 
-v2 is a version of the whole repository, not of one workflow: `ci.yml`, `deploy.yml`, `release.yml` and `code-review.yml` all moved to `@v2` together. Once `v2` exists the `v1` tag stops moving, so a caller left on `@v1` keeps working but never gets another fix (see [contributing.md → Breaking changes](contributing.md#breaking-changes)). Change `@v1` to `@v2` in every `uses: refokus-agency/platform/...` line of the repository's `.github/workflows/`, in the same pull request:
+v2 is a version of the whole repository, not of one workflow: `ci.yml`, `deploy.yml`, `release.yml` and `code-review.yml` all moved to `@v2` together. Once `v2` exists the `v1` tag stops moving, so a caller left on `@v1` keeps working but never gets another fix (see [contributing.md → Breaking changes](contributing.md#breaking-changes)). Move every `uses: refokus-agency/platform/...` line of the repository's `.github/workflows/` in the same pull request.
+
+List every reference, whatever its ref, together with every `platform-ref` input:
 
 ```bash
-grep -rn 'refokus-agency/platform/.github/workflows/.*@v1' .github/workflows/
+grep -rnE 'refokus-agency/platform/\.github/workflows/[^@ ]+@|platform-ref:' .github/workflows/
 ```
 
-Do not mix majors in one repository: `pr-preview.yml` on `@v2` records the preview deployment that `comment-code-review.yml` on `@v2` reads.
+Sort each hit into one of these:
 
-### Required changes
+| What you find | What to do |
+|---|---|
+| `@v1` (the floating tag) | Replace mechanically, see step 2. |
+| `@v1.x.y` (an exact release) | Pick on purpose: `@v2` to float like the examples, or an exact `@v2.x.y` to keep pinning. Do not let a substitution turn it into `@v2.x.y` with the old minor: `@v2.12.1` does not exist. |
+| `@<40-char SHA>` | Resolve the v2 release you want to its commit and pin that, keeping a `# v2.x.y` comment: `git ls-remote https://github.com/refokus-agency/platform refs/tags/v2.1.0`. |
+| `@main` or another branch | Decide whether the caller should leave the branch. If it stays, it is not on v1 or v2; nothing in this section applies. |
+| `platform-ref: ...` | See [`platform-ref`](#platform-ref-must-not-point-at-v1). |
 
-- **`pr-preview.yml` must grant `deployments: write`.** v2's `deploy.yml` records every preview as a GitHub deployment and fails the preview deploy, before the build, when it can't. Add the line to the caller's `permissions:` block, as in [`examples/pr-preview.yml`](../examples/pr-preview.yml). Stage and production callers need no change: without the permission they still deploy and only log a warning.
-- **`comment-code-review.yml` must grant `deployments: read` when the repository sets `SITE_URL_TEMPLATE`.** v2's `code-review.yml` reads the preview deployment of the pull request head to review the site, and stops the review with a comment when it cannot read deployments. Add the line to the caller's `permissions:` block, as in [`examples/comment-code-review.yml`](../examples/comment-code-review.yml). A repository without the variable needs no change. See [secrets.md → `SITE_URL_TEMPLATE`](secrets.md#site_url_template-for-the-preview-site-review).
+### 2. Re-pin `@v1` to `@v2`
+
+Only for the floating `@v1`. The match is anchored on whitespace or end of line, so `@v1.12.1` and `@v10` are left alone; review those by hand per the table above. `perl` because `sed -i` takes different arguments on macOS and Linux:
+
+```bash
+perl -pi -e 's{(refokus-agency/platform/\.github/workflows/[\w.-]+\.ya?ml)\@v1(?=\s|$)}{$1\@v2}g' .github/workflows/*.y*ml
+git diff
+```
+
+Run the grep from step 1 again afterwards: the only `@v1` left should be ones you decided to keep.
+
+Do not mix majors in one repository: the preview caller on `@v2` records the preview deployment that `comment-code-review.yml` on `@v2` reads.
+
+A `# x-release-please-major` comment at the end of a `uses:` line is platform's own marker: release-please rewrites the `@vN` of `examples/` and the README on a major bump. It does nothing in your repository. Leaving it in after copying an example is harmless, and so is deleting it.
+
+### 3. Required changes
+
+- **Every caller that runs `deploy.yml` with `environment: preview` must grant `deployments: write`.** That is usually `pr-preview.yml`, but the file name is not what matters: find the jobs with `environment: preview` under `with:`. v2's `deploy.yml` records every preview as a GitHub deployment and fails the preview deploy, before the build, when it can't. Add the line to that workflow's `permissions:` block, as in [`examples/pr-preview.yml`](../examples/pr-preview.yml). If the job sets its own `permissions:`, add it there.
+- **`comment-code-review.yml` should grant `deployments: read`.** Add it whether or not the repository uses `SITE_URL_TEMPLATE`, as [`examples/comment-code-review.yml`](../examples/comment-code-review.yml) does. With the variable set, v2's `code-review.yml` reads the preview deployment of the pull request head to review the site, and stops the review with a comment when it cannot read deployments. Without the variable the permission is never used. Adding it always saves checking, and keeps the review working if someone sets the variable later. To check anyway, the variable can be set on the repository or on the organization: `gh variable list --repo <owner>/<repo>` and `gh variable list --org <owner>` (names only are enough). See [secrets.md → `SITE_URL_TEMPLATE`](secrets.md#site_url_template-for-the-preview-site-review).
+- **Delete any `opus-model:` line from the `code-review.yml` caller.** The input was removed in v2.1.0, and `@v2` floats to the latest v2.x release, so a caller that still passes it fails at startup with an unknown-input error. See the Opus entry under [behavior changes](#behavior-changes-with-no-action-required).
+
+### Stage and production callers
+
+Callers that run `deploy.yml` with `environment: stage` or `production` keep deploying without any permission change: when they cannot record the GitHub deployment they log a warning and carry on. The examples still grant `deployments: write` in [`main-stage.yml`](../examples/main-stage.yml), [`main-production.yml`](../examples/main-production.yml) and [`production-deploy.yml`](../examples/production-deploy.yml), because with it each stage and production deploy shows up as a GitHub deployment (the repository's **Environments** and deployment history) and the warning goes away. Recommended, not required.
+
+### `platform-ref` must not point at v1
+
+`deploy.yml` checks out platform a second time, at the `platform-ref` input, to load its composite action and scripts. In v2 that includes `github-deployment.cjs`, which records the preview. The default is `main`, which already has it. A caller that sets `platform-ref` to `v1`, `v1.x.y`, a commit from before v2 or an old branch makes the preview deploy fail with `Could not load github-deployment.cjs from platform-ref`. Stage and production only log the same message as a warning.
+
+Delete `platform-ref` unless you know why it is there. If you need the reusable and its scripts to move together, set it to the same ref as the `uses:` line (`v2`, or the exact `v2.x.y`). See [architecture.md → Why does each reusable re-checkout the `platform` repo?](architecture.md#why-does-each-reusable-re-checkout-the-platform-repo).
+
+### 4. Compare against `examples/`
+
+Diff each caller against the example it came from (`diff .github/workflows/pr-preview.yml <(curl -s https://raw.githubusercontent.com/refokus-agency/platform/v2/examples/pr-preview.yml)`) and confirm the only differences are ones the repository needs on purpose: extra `with:` inputs, a different trigger branch, `submodules: true`. Anything else is drift from v1 that is worth fixing in the same pull request or noting in its description.
+
+### 5. Verify
+
+Before merging, on the migration pull request:
+
+- [ ] Every platform job's log, in its **Set up job** step, shows the reusable resolved at `refs/tags/v2` (`Uses: refokus-agency/platform/.github/workflows/<name>.yml@refs/tags/v2 (<sha>)`), or at the exact tag or SHA you pinned.
+- [ ] CI passes.
+- [ ] For a repository with previews: the preview deploy succeeds, and the GitHub deployment it records is there, in `success`, for the pull request head:
+
+  ```bash
+  gh api "repos/<owner>/<repo>/deployments?environment=preview&sha=$(gh pr view <number> --repo <owner>/<repo> --json headRefOid -q .headRefOid)" \
+    --jq '.[0].statuses_url' | xargs -I{} gh api {} --jq '.[0].state'
+  ```
+
+  The command prints `success`. An empty result means no deployment was recorded.
+- [ ] For a repository with code review: comment the trigger phrase (default `@claude review`) and check that the review runs to the end and posts its summary. With `SITE_URL_TEMPLATE` set, the job log shows the preview site resolved, not a `Context not read:` block or a comment asking for `deployments: read`.
+
+After merging:
+
+- [ ] The first stage or production deploy from the default branch succeeds, and its log shows `@refs/tags/v2`.
+- [ ] No `deployments: write` warning in that log, if you added the permission.
+
+### Rolling back
+
+Revert the migration pull request. `@v1` still works and still points at `v1.12.1`; it is frozen, not removed, so a reverted caller runs exactly as before the upgrade. Stage and production deploys recorded under v2 stay in the repository's deployment history and do no harm. Fix the problem on a branch and upgrade again; do not leave one repository on two majors.
 
 ### Behavior changes with no action required
 

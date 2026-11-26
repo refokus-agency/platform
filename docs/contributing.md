@@ -10,7 +10,7 @@ If you're a consumer of the reusables (you have a caller workflow in your repo),
 
 ## The blast radius
 
-Most repos in the org point their workflows at `refokus-agency/platform@v1` (the floating major tag). A breaking change merged into `main` becomes part of the next release, and once that release is cut, `@v1` moves to it — at which point every consumer picks it up.
+Most repos in the org point their workflows at `refokus-agency/platform@v2` (the floating major tag; `@v1` is frozen at `v1.12.1`). A breaking change merged into `main` becomes part of the next release, and once that release is cut, `@v2` moves to it — at which point every consumer picks it up.
 
 Treat this repo accordingly:
 
@@ -53,7 +53,7 @@ PR description should cover:
 
 ### 5. Merge
 
-After review, squash-merge into `main`. The merge becomes part of the next release-please release PR; once that PR is merged, `@v1` moves to the new commit and consumers pick it up on their next run.
+After review, squash-merge into `main`. The merge becomes part of the next release-please release PR; once that PR is merged, `@v2` moves to the new commit and consumers pick it up on their next run.
 
 ## Testing changes
 
@@ -70,7 +70,7 @@ You can't test a reusable workflow by "running" it — it only runs when called.
 
 3. Push a commit to trigger the caller.
 4. Watch the run. Iterate.
-5. Once happy, revert the test repo to `@v1`, merge your PR into `platform`.
+5. Once happy, revert the test repo to `@v2`, merge your PR into `platform`.
 
 This is the most realistic test — it exercises the actual caller → reusable path.
 
@@ -95,12 +95,12 @@ Useful for testing in isolation, but **remove the `workflow_dispatch` trigger be
 
 ## Versioning
 
-Callers reference the floating major tag `@v1`. `@v1` always points at the latest non-breaking release on the v1.x line.
+Callers reference the floating major tag of the current major, `@v2`. `@v2` always points at the latest non-breaking release on the v2.x line. `@v1` is frozen at `v1.12.1`.
 
-- **Patch / minor changes** (non-breaking): each release moves `@v1` to the new commit. Callers on `@v1` pick it up on their next run.
-- **Breaking changes**: a new major (`v2`) is cut. Callers stay on `@v1` until they explicitly migrate by editing their `uses:` line.
+- **Patch / minor changes** (non-breaking): each release moves `@v2` to the new commit. Callers on `@v2` pick it up on their next run.
+- **Breaking changes**: a new major (`v3`) is cut. Callers stay on `@v2` until they explicitly migrate by editing their `uses:` line, as happened with `v1` → `v2` (see [migration.md → Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2)).
 
-`@main` is still available — useful for testing pre-release changes from a low-stakes consumer, or for repos that want bleeding edge. The vast majority should use `@v1`.
+`@main` is still available — useful for testing pre-release changes from a low-stakes consumer, or for repos that want bleeding edge. The vast majority should use `@v2`.
 
 ### How releases work
 
@@ -111,7 +111,7 @@ Releases are automated by [release-please](https://github.com/googleapis/release
 3. When you merge the release PR, release-please:
    - Tags the merge commit (`v1.2.3`).
    - Creates a GitHub Release.
-   - The `release-please.yml` workflow's follow-up job force-moves `v1` to the same commit, so consumers on `@v1` pick up the change.
+   - The `release-please.yml` workflow's follow-up job force-moves `v2` to the same commit, so consumers on `@v2` pick up the change.
 
 Two visible artifacts: the **release PR** (your gate to cut the version when you want) and the **GitHub Release** (after merge, with changelog).
 
@@ -126,7 +126,7 @@ A change is **breaking** if it:
 
 For breaking changes:
 
-1. Use a `feat!:` prefix or include a `BREAKING CHANGE:` footer in the commit. Release-please picks this up and cuts a major bump (`v1.x.y` → `v2.0.0`) on the next release PR.
+1. Use a `feat!:` prefix or include a `BREAKING CHANGE:` footer in the commit. Release-please picks this up and cuts a major bump (for example `v2.x.y` → `v3.0.0`) on the next release PR.
 2. Document the migration path in a `## Upgrading from vN to vN+1` section of [migration.md](migration.md) (see [Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2)).
 3. Announce in the team channel before merging the release PR — once `v2` exists, `@v1` stops moving and consumers stay on the old line until they migrate explicitly.
 4. Update `examples/` in this repo to point at `@v2` so new repos start on the current major.
@@ -171,7 +171,7 @@ uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 uses: actions/checkout@v7
 ```
 
-This applies to `.github/workflows/**` and `.github/actions/**`. It does **not** apply to first-party `refokus-agency/platform/...@v1` references in `examples/` (those are deliberately floating — see [architecture.md](architecture.md#why-are-third-party-actions-pinned-by-sha)) or to local `./` references.
+This applies to `.github/workflows/**` and `.github/actions/**`. It does **not** apply to first-party `refokus-agency/platform/...@v2` references in `examples/` (those are deliberately floating — see [architecture.md](architecture.md#why-are-third-party-actions-pinned-by-sha)) or to local `./` references.
 
 Don't type SHAs by hand. Generate them:
 
@@ -236,8 +236,8 @@ Releases are fully automated. To cut one:
 
 1. Land your conventional-commit PRs on `main` as usual.
 2. Release-please will (re)open a PR titled something like `chore(main): release 1.2.3`. Review the proposed CHANGELOG and version.
-3. Merge the release PR. The `release-please.yml` workflow tags `v1.2.3`, creates the GitHub Release, and force-moves `v1` to the same commit.
-4. Verify on the Tags page that `v1` now points at the new commit. Consumers on `@v1` pick it up automatically on their next run.
+3. Merge the release PR. The `release-please.yml` workflow tags `v2.3.4`, creates the GitHub Release, and force-moves `v2` to the same commit.
+4. Verify on the Tags page that `v2` now points at the new commit. Consumers on `@v2` pick it up automatically on their next run.
 
 You don't tag manually. If something looks off in the release PR (wrong version, missing entries), check that the underlying commit messages used the right conventional-commit types.
 

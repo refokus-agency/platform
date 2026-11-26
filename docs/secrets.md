@@ -26,7 +26,7 @@ In the caller:
 
 ```yaml
 ci:
-  uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+  uses: refokus-agency/platform/.github/workflows/ci.yml@v2
   secrets: inherit   # <- passes all available secrets
 ```
 
@@ -44,7 +44,7 @@ The files in [`examples/`](../examples/) ship with `secrets: inherit` because th
 The reason is structural, not a statement about trust:
 
 - **`inherit` is a blanket forward, not a filter** — see the section above. It hands the called workflow every secret the caller can see, undeclared keys included. An explicit map is the only thing that bounds what crosses the organization boundary.
-- **`@v1` is a floating tag**, force-moved on every v1.x release, so the code your secrets reach can change without you changing a line. GitHub documents `inherit` for callers in the same organization or enterprise, where that shared ownership already exists. Outside it, list the keys — and if the moving tag is itself the concern, pin the ref as well: `@main` and `@<sha>` are both supported (see [architecture.md](architecture.md#versioning-with-release-please)). The two bound different things. An explicit map bounds **which secrets** cross the organization boundary; a pinned ref bounds **which code** receives them.
+- **`@v2` is a floating tag**, force-moved on every v2.x release, so the code your secrets reach can change without you changing a line. GitHub documents `inherit` for callers in the same organization or enterprise, where that shared ownership already exists. Outside it, list the keys — and if the moving tag is itself the concern, pin the ref as well: `@main` and `@<sha>` are both supported (see [architecture.md](architecture.md#versioning-with-release-please)). The two bound different things. An explicit map bounds **which secrets** cross the organization boundary; a pinned ref bounds **which code** receives them.
 
 Everything else in the examples stays as it ships: same `uses:` lines, same `permissions:`, same `with:` inputs. The only edit is the `secrets:` block.
 
@@ -71,7 +71,7 @@ Two notes on reading that table:
 ```yaml
 jobs:
   ci:
-    uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+    uses: refokus-agency/platform/.github/workflows/ci.yml@v2
     secrets:
       # Only needed with `submodules: true` pointing at a different private repo.
       CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}
@@ -82,7 +82,7 @@ jobs:
 ```yaml
 jobs:
   deploy:
-    uses: refokus-agency/platform/.github/workflows/deploy.yml@v1
+    uses: refokus-agency/platform/.github/workflows/deploy.yml@v2
     with:
       environment: preview   # or stage | production
     secrets:
@@ -97,7 +97,7 @@ jobs:
 ```yaml
 jobs:
   release:
-    uses: refokus-agency/platform/.github/workflows/release.yml@v1
+    uses: refokus-agency/platform/.github/workflows/release.yml@v2
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -111,11 +111,11 @@ permissions:
   pull-requests: write
   issues: write     # for the 👀 acknowledgement on the triggering comment
   id-token: write   # mandatory — the run just fails without it
-  # deployments: read   # only when the repo sets SITE_URL_TEMPLATE, see below
+  deployments: read # used when the repo sets SITE_URL_TEMPLATE, see below; harmless otherwise
 
 jobs:
   code-review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v2
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       # Or, instead of the API key:
@@ -174,7 +174,7 @@ If none is configured, the workflow emits a `::notice` naming what's missing, sk
 ```yaml
 jobs:
   code-review:
-    uses: refokus-agency/platform/.github/workflows/code-review.yml@v1
+    uses: refokus-agency/platform/.github/workflows/code-review.yml@v2
 ```
 
 Set them at `https://github.com/organizations/<org>/settings/variables/actions` (the **Variables** tab, not Secrets). A caller can still override either per repo by passing it explicitly under `with:`. If a variable is unset, the input resolves to an empty string and the guard falls through to the other credential paths — nothing breaks.
@@ -337,7 +337,7 @@ To fix that, pass `CHECKOUT_TOKEN` — a token with read access to the submodule
 
 ```yaml
 ci:
-  uses: refokus-agency/platform/.github/workflows/ci.yml@v1
+  uses: refokus-agency/platform/.github/workflows/ci.yml@v2
   with:
     submodules: true
   secrets: inherit   # forwards CHECKOUT_TOKEN if the org/repo has one configured
