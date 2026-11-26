@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Releases on or after `v1.1.0` are managed by [release-please](https://github.com/googleapis/release-please-action) — the changelog below those entries is generated from conventional commits. The pre-`v1.1.0` history is preserved manually.
 
+## [2.1.0](https://github.com/refokus-agency/platform/compare/v2.0.0...v2.1.0) (2026-11-26)
+
+
+### Features
+
+* **code-review:** default the review to Opus 5.5 and drop opus-model ([#147](https://github.com/refokus-agency/platform/issues/147)) ([042d99f](https://github.com/refokus-agency/platform/commit/042d99f9d16868686cbde03bec6ddcd9e0e4725a))
+
 ## [2.0.0](https://github.com/refokus-agency/platform/compare/v1.12.1...v2.0.0) (2026-11-20)
 
 
