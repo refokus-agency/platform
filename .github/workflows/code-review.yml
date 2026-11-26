@@ -179,19 +179,11 @@ on:
           Model for the ORCHESTRATOR only — the agent that dispatches subagents and posts the
           comments. Reaches the CLI as --model through claude_args; the action has no `model`
           input. It is NOT what the review costs: the command names a tier per subagent in its
-          own prompt. See docs/architecture.md#how-the-review-models-are-chosen.
+          own prompt, and those tiers run as written. See
+          docs/architecture.md#how-the-review-models-are-chosen.
         required: false
         type: string
-        default: claude-sonnet-5
-      opus-model:
-        description: |
-          Model ID the `opus` alias resolves to, exported as ANTHROPIC_DEFAULT_OPUS_MODEL. Keeps
-          Opus out of the review, including the bug scans the command requests by alias. Set
-          claude-opus-5 to restore the command's intended tiers; there is no "off" value.
-          See docs/architecture.md#how-the-review-models-are-chosen.
-        required: false
-        type: string
-        default: claude-sonnet-5
+        default: claude-opus-5-5
       allowed-tools:
         description: |
           Comma-separated tool allowlist passed to the Claude CLI as --allowedTools.
@@ -415,10 +407,6 @@ jobs:
     # grant it or the run fails at startup. Callers need `contents: read`,
     # `pull-requests: write`, `issues: write` and `id-token: write`, plus
     # `deployments: read` when they set SITE_URL_TEMPLATE; see examples/comment-code-review.yml.
-    #
-    # Job level, not on the review step — the action's own env block shadows a step-level value.
-    env:
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ inputs.opus-model }}
     steps:
       - name: Resolve auth
         id: auth
