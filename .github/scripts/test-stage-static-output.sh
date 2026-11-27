@@ -340,6 +340,46 @@ case_wipes_previous() {
   stage . .vercel/output wireframes
   expect_rc 0
   expect_staged wireframes/new.html
+  no_leftovers
+}
+
+# No staging leftovers next to <out-dir>, after a successful run or a failed one.
+no_leftovers() {
+  [ -z "$(find "$REPO/.vercel" -maxdepth 1 -name '.stage-static-output.*' 2>/dev/null)" ]
+  check "no staging directories left in .vercel/" $?
+}
+
+# Rule 2: a subfolder find cannot read fails the run. Publishing what was readable would deploy
+# an incomplete site with exit 0. Root reads anything, so the case cannot be set up as root.
+case_unreadable_folder() {
+  if [ "$(id -u)" -eq 0 ]; then echo "    skip: running as root"; return; fi
+  put "wireframes/home.html" home
+  put "wireframes/locked/page.html" page
+  put ".vercel/output/sentinel" keep
+  chmod 000 "$REPO/wireframes/locked"
+  stage . .vercel/output wireframes
+  chmod 755 "$REPO/wireframes/locked"
+  expect_rc 1
+  says "::error::Could not read everything under 'wireframes'"
+  never_says "published:"
+  expect_untouched_output
+  no_leftovers
+}
+
+# A copy that fails after validation leaves <out-dir> as it was: the output is staged next to it
+# and only swapped in once complete.
+case_copy_fails_keeps_output() {
+  if [ "$(id -u)" -eq 0 ]; then echo "    skip: running as root"; return; fi
+  put "wireframes/home.html" home
+  put "wireframes/secret.html" unreadable
+  put ".vercel/output/sentinel" keep
+  chmod 000 "$REPO/wireframes/secret.html"
+  stage . .vercel/output wireframes
+  chmod 644 "$REPO/wireframes/secret.html"
+  [ "$RC" -ne 0 ]; check "non-zero exit (rc=$RC, output: $ERR)" $?
+  never_says "published:"
+  expect_untouched_output
+  no_leftovers
 }
 
 case_duplicate_folder() {
@@ -431,6 +471,25 @@ case_contract() {
   yq '.jobs.deploy.steps[] | select(.name == "Comment deploy URL on PR") | .with.script' "$WF" |
     grep -qF "c.user.login === 'github-actions[bot]'"
   check "PR comment only edits the bot's own comment" $?
+  # The comment names the environment it deployed to, not always "preview".
+  [ "$(yq '.jobs.deploy.steps[] | select(.name == "Comment deploy URL on PR") | .env.DEPLOY_ENV' "$WF")" = '${{ inputs.environment }}' ]
+  check "PR comment gets the environment" $?
+  ! yq '.jobs.deploy.steps[] | select(.name == "Comment deploy URL on PR") | .with.script' "$WF" | grep -qF 'Vercel preview'
+  check "PR comment label is not hardcoded to preview" $?
+}
+
+# A multi-line `folders:` block is listed one folder per line, not inside one pair of backticks.
+case_summary() {
+  step_script "Summary"
+  export ENVIRONMENT=production DEPLOY_URL=https://site.vercel.app HEAD_SHA=abc123
+  export FOLDERS=$'wireframes\n  artifacts\n'
+  run_step
+  expect_rc 0
+  local summary
+  summary=$(cat "$GITHUB_STEP_SUMMARY")
+  printf '%s\n' "$summary" | grep -qxF '  - `wireframes`'; check "wireframes listed (got: $summary)" $?
+  printf '%s\n' "$summary" | grep -qxF '  - `artifacts`'; check "artifacts listed (got: $summary)" $?
+  printf '%s\n' "$summary" | grep -qxF '### Vercel production deploy (static)'; check "heading names the environment" $?
 }
 
 check_env() { # ENVIRONMENT FOLDERS VERCEL_VERSION, then the secret names that are set
@@ -721,9 +780,10 @@ case_deploy_bad_url() {
 # --- runner ----------------------------------------------------------------------------------
 
 ALL=(allowlist any_folders dotfiles symlinks symlinked_folder readmes keep_readmes spaces
-  invalid_folders no_folders missing_folder empty_output wipes_previous duplicate_folder
+  invalid_folders no_folders missing_folder empty_output wipes_previous unreadable_folder
+  copy_fails_keeps_output duplicate_folder
   out_dir_is_root out_dir_outside_repo usage no_inline_expressions only_prebuilt_deploy contract
-  check_ok check_missing_secrets check_bad_inputs stage_step stage_step_old_platform_ref
+  summary check_ok check_missing_secrets check_bad_inputs stage_step stage_step_old_platform_ref
   deploy_preview deploy_preview_personal_scope deploy_preview_became_production
   deploy_preview_readback_error deploy_production deploy_token_from_env deploy_bad_url
   precheck_has_production precheck_personal_scope precheck_no_production precheck_api_error

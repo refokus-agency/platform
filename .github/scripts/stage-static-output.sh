@@ -8,8 +8,9 @@
 #   stage-static-output.sh [--keep-readmes] <repo-root> <out-dir> <folder>...
 #
 # <out-dir> must resolve to a directory inside <repo-root> (not the root itself, an ancestor of
-# it or anywhere outside it), because it is wiped. Wipes <out-dir>, then writes <out-dir>/config.json ({"version":3}) and
-# <out-dir>/static/<path relative to repo-root> for every file it publishes.
+# it or anywhere outside it), because it is replaced. Writes config.json ({"version":3}) and
+# static/<path relative to repo-root> for every file it publishes into a temporary directory next
+# to <out-dir>, then swaps it in for <out-dir>.
 #
 # The rules, in the order they apply:
 #   1. Each <folder> is a plain top-level folder name: letters, digits, `.`, `_` and `-`, not
@@ -28,9 +29,10 @@
 #      nothing on a production deploy, so zero files is an error, not an empty deploy.
 #
 # Prints each published path on stdout, then each excluded path with its reason, then a count.
-# Exit codes: 0 staged at least one file; 1 a listed folder is not a real directory, or nothing
-# to publish; 2 usage error, an invalid folder name or an <out-dir> outside the repository.
-# <out-dir> is left untouched on every non-zero exit.
+# Exit codes: 0 staged at least one file; 1 a listed folder is not a real directory, a folder
+# could not be read in full, nothing to publish, or staging failed (a mkdir or cp error); 2 usage
+# error, an invalid folder name or an <out-dir> outside the repository. <out-dir> is left
+# untouched on every non-zero exit.
 
 set -euo pipefail
 
@@ -62,7 +64,7 @@ if [ ! -d "$REPO_ROOT" ]; then
   exit 2
 fi
 
-# Rule 1. Validated before anything is wiped or written.
+# Rule 1. Validated before anything is replaced or written.
 FOLDERS=()
 for folder in "$@"; do
   if ! [[ "$folder" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
@@ -82,7 +84,7 @@ case "$OUT_DIR" in
 esac
 cd "$REPO_ROOT"
 
-# <out-dir> is wiped below, so it must resolve to a directory strictly inside the repository:
+# <out-dir> is replaced below, so it must resolve to a directory strictly inside the repository:
 # never the root, an ancestor of it, or anything outside it. `..` is refused outright. The
 # deepest part that exists is resolved with `pwd -P` (symlinks included), and the parts that
 # do not exist yet are appended as they are.
@@ -105,6 +107,33 @@ case "$OUT_REAL" in
     exit 2
     ;;
 esac
+
+# Scratch space for the walks, and the staging directory once it exists. Both are removed on
+# every exit, so a failed run leaves nothing behind in the repository.
+WORK=$(mktemp -d)
+STAGE=""
+OLD=""
+cleanup() {
+  rm -rf "$WORK"
+  [ -z "$STAGE" ] || rm -rf "$STAGE"
+  # Empty unless a failed swap could not put the previous output back: then it is kept.
+  [ -z "$OLD" ] || rmdir "$OLD" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Runs find with the given arguments into <out-file>, sorted. Not a `< <(find ...)` process
+# substitution: its exit status is never checked, so an unreadable subfolder would just shorten
+# the list and publish an incomplete site. A find that fails here fails the run before anything
+# is staged.
+walk() { # <out-file> <find args>...
+  local out=$1
+  shift
+  if ! find "$@" >"$out"; then
+    echo "::error::Could not read everything under '$folder' (see the find error above). Publishing what was readable would deploy an incomplete site, so nothing was staged." >&2
+    exit 1
+  fi
+  sort -z "$out" -o "$out"
+}
 
 INCLUDED=()
 EXCLUDED=()  # "<reason> <path>"
@@ -129,29 +158,32 @@ for folder in "${FOLDERS[@]}"; do
 
   # find -P (the default) never follows a symlink. Each walk prunes dot-entries first, so
   # nothing inside a dot-folder is seen at all.
-  while IFS= read -r -d '' path; do  # rule 3
+  walk "$WORK/dotfiles" "$folder" -mindepth 1 -name '.*' -prune -print0  # rule 3
+  while IFS= read -r -d '' path; do
     EXCLUDED+=("dotfile $path")
     n_dotfile=$((n_dotfile + 1))
-  done < <(find "$folder" -mindepth 1 -name '.*' -prune -print0 | sort -z)
+  done <"$WORK/dotfiles"
 
-  while IFS= read -r -d '' path; do  # rule 4
+  walk "$WORK/symlinks" "$folder" -mindepth 1 -name '.*' -prune -o -type l -print0  # rule 4
+  while IFS= read -r -d '' path; do
     EXCLUDED+=("symlink $path")
     n_symlink=$((n_symlink + 1))
-  done < <(find "$folder" -mindepth 1 -name '.*' -prune -o -type l -print0 | sort -z)
+  done <"$WORK/symlinks"
 
-  while IFS= read -r -d '' path; do  # rules 2 and 5
+  walk "$WORK/files" "$folder" -mindepth 1 -name '.*' -prune -o -type f -print0  # rules 2 and 5
+  while IFS= read -r -d '' path; do
     if [ "$KEEP_READMES" -eq 0 ] && [[ "$path" == "$folder/readme.md" ]]; then
       EXCLUDED+=("readme $path")
       n_readme=$((n_readme + 1))
     else
       INCLUDED+=("$path")
     fi
-  done < <(find "$folder" -mindepth 1 -name '.*' -prune -o -type f -print0 | sort -z)
+  done <"$WORK/files"
 done
 
 shopt -u nocasematch
 
-# Rules 1 and 6, checked before <out-dir> is wiped. `vercel deploy --prebuilt --prod` with an
+# Rules 1 and 6, checked before anything is staged. `vercel deploy --prebuilt --prod` with an
 # empty output would take the live site down, so neither case may reach the deploy.
 if [ "$NOT_FOLDERS" -gt 0 ]; then
   echo "error: $NOT_FOLDERS listed folder(s) are not folders in this repository. Nothing was staged." >&2
@@ -165,14 +197,35 @@ if [ "${#INCLUDED[@]}" -eq 0 ]; then
   exit 1
 fi
 
-# Wiped first: a file deleted or renamed in the repository must disappear on the next deploy.
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR/static"
-printf '{"version":3}\n' >"$OUT_DIR/config.json"
+# Staged into a fresh directory next to <out-dir> (same filesystem, so the moves below are
+# renames), then swapped in. A failed mkdir or cp leaves <out-dir> as it was. The resolved path
+# is used from here on, so every write lands inside the repository. <out-dir> is replaced, not
+# merged into: a file deleted or renamed in the repository must disappear on the next deploy.
+PARENT=$(dirname "$OUT_REAL")
+mkdir -p "$PARENT"
+STAGE=$(mktemp -d "$PARENT/.stage-static-output.XXXXXX")
+mkdir "$STAGE/static"
+printf '{"version":3}\n' >"$STAGE/config.json"
 
 for path in ${INCLUDED[@]+"${INCLUDED[@]}"}; do
-  mkdir -p "$OUT_DIR/static/$(dirname "$path")"
-  cp "$path" "$OUT_DIR/static/$path"
+  mkdir -p "$STAGE/static/$(dirname "$path")"
+  cp "$path" "$STAGE/static/$path"
+done
+
+if [ -e "$OUT_REAL" ] || [ -L "$OUT_REAL" ]; then
+  OLD=$(mktemp -d "$PARENT/.stage-static-output.old.XXXXXX")
+  mv "$OUT_REAL" "$OLD/out"
+fi
+if ! mv "$STAGE" "$OUT_REAL"; then
+  [ -z "$OLD" ] || mv "$OLD/out" "$OUT_REAL"
+  echo "::error::Could not move the staged output into $OUT_DIR. It was left as it was." >&2
+  exit 1
+fi
+STAGE=""
+[ -z "$OLD" ] || rm -rf "$OLD"
+OLD=""
+
+for path in ${INCLUDED[@]+"${INCLUDED[@]}"}; do
   echo "published: $path"
 done
 for entry in ${EXCLUDED[@]+"${EXCLUDED[@]}"}; do

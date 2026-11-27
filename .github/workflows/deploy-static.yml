@@ -271,7 +271,12 @@ jobs:
             echo ""
             echo "- URL: $DEPLOY_URL"
             echo "- Commit: \`$HEAD_SHA\`"
-            echo "- Published folders: \`$FOLDERS\`"
+            # `folders` may be a multi-line block: one list item per folder keeps the markdown intact.
+            echo "- Published folders:"
+            read -r -d '' -a folders <<<"$FOLDERS" || true
+            for folder in "${folders[@]}"; do
+              echo "  - \`$folder\`"
+            done
           } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Comment deploy URL on PR
@@ -279,13 +284,17 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_ENV: ${{ inputs.environment }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
-            const marker = '<!-- vercel-deploy-static-comment -->';
+            // One comment per environment, so a production deploy from a pull request does not
+            // overwrite the preview URL, and the label says which one it is.
+            const env = process.env.DEPLOY_ENV;
+            const marker = `<!-- vercel-deploy-static-comment:${env} -->`;
             const body = [
               marker,
-              `**Vercel preview:** ${process.env.DEPLOY_URL}`,
+              `**Vercel ${env} deploy:** ${process.env.DEPLOY_URL}`,
               '',
               `Deployed from \`${process.env.HEAD_SHA}\`. If the Vercel project has Deployment Protection, opening it may require a Vercel login.`,
             ].join('\n');
