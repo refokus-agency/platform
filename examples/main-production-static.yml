@@ -1,0 +1,42 @@
+# Vercel production deploy of an allowlisted set of static folders, on push to main.
+# For repos that are not Node projects (no package.json, no lockfile), such as Brand Brains.
+# Copy to .github/workflows/main-production-static.yml in your repo.
+#
+# Only the folders listed in `folders` are uploaded; nothing else in the repository reaches
+# Vercel. Dotfiles, dot-folders and symlinks inside them are never published, and each folder's
+# own README.md is left out unless you set `exclude-readmes: false`.
+#
+# Optional: add a `paths:` filter under `push:` (e.g. `paths: ['wireframes/**', 'artifacts/**']`)
+# so pushes that touch neither folder don't redeploy.
+#
+# workflow_dispatch is kept as an escape hatch — lets you re-run a production deploy from the
+# Actions tab without pushing a new commit, e.g. after changing the Vercel project settings.
+#
+# The `secrets: inherit` below assumes your repo is in the refokus-agency org. Calling from
+# another organization? Swap it for an explicit secrets map: see
+# docs/secrets.md#calling-from-outside-refokus-agency.
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-production:
+    # Production only ever gets main: a manual run dispatched from another branch is skipped.
+    if: github.ref == 'refs/heads/main'
+    uses: refokus-agency/platform/.github/workflows/deploy-static.yml@v2 # x-release-please-major
+    with:
+      environment: production
+      folders: wireframes artifacts
+    secrets: inherit

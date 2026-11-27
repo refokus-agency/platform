@@ -53,3 +53,16 @@ jobs:
       # yq is preinstalled on ubuntu-latest; the tests need nothing else.
       - name: Test the Resolve actor step
         run: ./.github/scripts/test-resolve-actor.sh
+
+  stage-static-output:
+    name: deploy-static staging script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # yq is preinstalled on ubuntu-latest; the tests need nothing else.
+      - name: Test stage-static-output.sh and the deploy-static.yml steps around it
+        run: ./.github/scripts/test-stage-static-output.sh

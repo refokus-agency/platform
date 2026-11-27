@@ -199,6 +199,8 @@ If you change [`review-context.sh`](../.github/scripts/review-context.sh) or the
 
 If you change the `Resolve actor` step in `code-review.yml` (who may request a review), run `./.github/scripts/test-resolve-actor.sh`. It uses the same stub `gh`, and the `Script tests` workflow runs it on every pull request. The step decides which commenters get a review in every caller, so add a case for any behaviour you change.
 
+If you change [`stage-static-output.sh`](../.github/scripts/stage-static-output.sh) or a step in `deploy-static.yml`, run `./.github/scripts/test-stage-static-output.sh`. It builds throwaway repositories with symlinks, dotfiles and odd file names, and runs the workflow's own steps against a stub `npx`, so it needs no token or network. The `Script tests` workflow runs it on every pull request. The script decides what a repository publishes to Vercel and is fetched from `platform-ref` at run time, so add a case for any rule you change.
+
 **Bumps are Dependabot's job, not yours.** Dependabot updates the SHA and its version comment together, weekly, so its PRs pass the gate unmodified.
 
 One thing Dependabot can't do for you: it does not look inside `.github/actions/`. If you add a composite action there, it needs its own entry in `.github/dependabot.yml` or its pins freeze forever. You don't have to remember this — the `Composite actions have Dependabot coverage` job fails the PR and prints the block to paste. To check before pushing:

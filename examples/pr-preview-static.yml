@@ -1,0 +1,41 @@
+# Vercel preview deploy of an allowlisted set of static folders, on pull requests.
+# For repos that are not Node projects (no package.json, no lockfile), such as Brand Brains.
+# Copy to .github/workflows/pr-preview-static.yml in your repo.
+#
+# Only the folders listed in `folders` are uploaded; nothing else in the repository reaches
+# Vercel. Dotfiles, dot-folders and symlinks inside them are never published, and each folder's
+# own README.md is left out unless you set `exclude-readmes: false`.
+#
+# Optional: add a `paths:` filter under `pull_request:` (e.g. `paths: ['wireframes/**',
+# 'artifacts/**']`) so pull requests that touch neither folder don't deploy.
+#
+# The `secrets: inherit` below assumes your repo is in the refokus-agency org. Calling from
+# another organization? Swap it for an explicit secrets map: see
+# docs/secrets.md#calling-from-outside-refokus-agency.
+
+name: Pull Request Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Required: deploy-static.yml records each preview as a GitHub deployment and
+  # fails the preview deploy without this.
+  deployments: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    # Dependabot and fork pull requests can't read the Vercel secrets: skip instead of failing.
+    if: github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: refokus-agency/platform/.github/workflows/deploy-static.yml@v2 # x-release-please-major
+    with:
+      environment: preview
+      folders: wireframes artifacts
+    secrets: inherit

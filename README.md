@@ -4,7 +4,7 @@ Reusable GitHub Actions workflows for Node projects: CI, Vercel deploys, semanti
 
 ## What this is for
 
-Instead of duplicating CI/CD logic across repos, this repo provides four reusable workflows (CI, deploy, release, code review) plus a composite action (setup) that each project consumes with small caller workflow files.
+Instead of duplicating CI/CD logic across repos, this repo provides five reusable workflows (CI, deploy, static deploy, release, code review) plus a composite action (setup) that each project consumes with small caller workflow files.
 
 ## Quick start
 
@@ -19,6 +19,8 @@ Pick the workflow files that match **the triggers your repo cares about** and co
 | [`main-stage.yml`](examples/main-stage.yml) | push to `main` | CI + Vercel stage deploy |
 | [`main-production.yml`](examples/main-production.yml) | push to `main` | CI + Vercel production deploy |
 | [`production-deploy.yml`](examples/production-deploy.yml) | push to `production` | CI + Vercel production deploy |
+| [`pr-preview-static.yml`](examples/pr-preview-static.yml) | PR | Vercel preview deploy of an allowlisted set of static folders (no Node project needed) |
+| [`main-production-static.yml`](examples/main-production-static.yml) | push to `main` | Vercel production deploy of an allowlisted set of static folders (no Node project needed) |
 | [`main-release.yml`](examples/main-release.yml) | push to `main` | CI + semantic-release to GitHub Packages |
 | [`main-release-npm.yml`](examples/main-release-npm.yml) | push to `main` | CI + semantic-release to public npm via OIDC Trusted Publishing |
 | [`comment-code-review.yml`](examples/comment-code-review.yml) | `@claude review` comment on a PR | AI code review — inline comments + summary on the PR |
@@ -31,6 +33,7 @@ Pick the workflow files that match **the triggers your repo cares about** and co
 | An npm library (release to public npm) | `pr-ci.yml` + `main-release-npm.yml` — needs `id-token: write` and a Trusted Publisher on npmjs.org; see [docs/secrets.md](docs/secrets.md) |
 | A Vercel-deployed app, 2 envs (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
 | A Vercel-deployed app, 3 envs (preview on PR, stage on main, prod on a `production` branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
+| A repo that is not a Node project and publishes only some folders (e.g. a Brand Brain's `wireframes/` and `artifacts/`) | `pr-preview-static.yml` + `main-production-static.yml` — only the folders listed in `folders` are uploaded; see [docs/architecture.md](docs/architecture.md#reusable-workflow-deploy-staticyml) |
 
 The shape is **per repo**, not per project type. A service can be 2-env or 3-env. A Webflow custom-code site can be 2-env if you don't need a stage gate. Pick the combo that matches your flow.
 
@@ -46,6 +49,7 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │   └── workflows/
 │       ├── ci.yml              # Reusable: lint + typecheck + test + build
 │       ├── deploy.yml          # Reusable: Vercel deploy (preview | stage | production)
+│       ├── deploy-static.yml   # Reusable: Vercel deploy of allowlisted static folders (preview | production)
 │       ├── release.yml         # Reusable: semantic-release (GitHub Packages or public npm via OIDC)
 │       └── code-review.yml     # Reusable: AI code review, on request, via claude-code-action
 ├── examples/                   # Atomic caller workflows, one per (trigger, action) pair
@@ -54,6 +58,8 @@ Make sure the required secrets are available at org or repo level (see [docs/sec
 │   ├── main-stage.yml          # push main → CI + Vercel stage
 │   ├── main-production.yml     # push main → CI + Vercel production
 │   ├── production-deploy.yml   # push production → CI + Vercel production
+│   ├── pr-preview-static.yml   # PR → Vercel preview of allowlisted static folders
+│   ├── main-production-static.yml # push main → Vercel production of allowlisted static folders
 │   ├── main-release.yml        # push main → CI + semantic-release (GitHub Packages)
 │   ├── main-release-npm.yml    # push main → CI + semantic-release (public npm via OIDC)
 │   └── comment-code-review.yml # `@claude review` comment on a PR → AI code review

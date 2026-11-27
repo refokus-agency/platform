@@ -54,6 +54,39 @@ The job still declares no `permissions:` block, on purpose: a declared `deployme
 
 `.github/scripts/record-github-deployment.cjs`, the v1 recorder (stage/production, success only), is no longer called by `deploy.yml` but stays in the repo: `platform-ref` defaults to `main`, so `deploy.yml@v1` loads its scripts from `main`, and deleting it there would break every v1 stage and production deploy.
 
+### Reusable workflow: `deploy-static.yml`
+
+Deploys an allowlisted copy of a few top-level folders to Vercel, at `preview` or `production`. It exists for repos that are not Node projects: a Brand Brain is a private repository of client documents with no `package.json` and no lockfile, and it publishes only `wireframes/` and `artifacts/` to its own Vercel project. The caller names the folders (`folders: wireframes artifacts`); everything else in the repository stays private.
+
+The job checks the inputs and the three `VERCEL_*` secrets first, naming whatever is missing. It then checks out the caller (on `pull_request`, the merge commit) and platform into `.platform/` for its scripts, and stages `.vercel/output` with [`stage-static-output.sh`](../.github/scripts/stage-static-output.sh): `config.json` (`{"version":3}`) plus `static/<path>` for each published file. It deploys that directory with `vercel deploy --prebuilt` (`--prod` for production) and checks the URL the CLI prints. It records the GitHub deployment with the same `github-deployment.cjs` lifecycle as `deploy.yml`, and on a pull request it keeps one sticky comment with the URL and the head SHA. The comment says the URL may ask for a Vercel login: a project with Deployment Protection serves previews only to signed-in team members. The workflow outputs `url`.
+
+Staging runs before the GitHub deployment starts, unlike the build in `deploy.yml`: a bad folder name fails without leaving a failed deployment behind. The PR comment step only ever edits a comment authored by `github-actions[bot]` that carries its marker, so quoting the marker in a human comment cannot get that comment overwritten.
+
+What the staging script publishes, rule by rule (its header and `test-stage-static-output.sh` are the source of truth):
+
+- Each listed folder must be a plain top-level name: no `/`, so no `..`, no absolute or nested path, and not starting with `.` or `-`. Anything else fails before the output directory is touched. A listed name that is not a real folder publishes nothing, with a warning.
+- Only regular files under those folders are published, at the same relative paths.
+- Dotfiles and dot-folders are left out at any depth, and a dot-folder is never descended into.
+- Symlinks are left out and never followed, including a listed folder that is itself a symlink.
+- With `exclude-readmes` (the default), each folder's own `README.md`, in any case, is left out: it documents the repository for the team. A `README.md` deeper down belongs to the content next to it and is published.
+- The output directory is wiped first, so a file deleted from the repository disappears on the next deploy.
+
+#### Why a separate reusable instead of a mode in `deploy.yml`?
+
+`deploy.yml` is built around a Node project. Its `setup` step fails without a lockfile, and `vercel pull` + `vercel build` build the checkout as a project: with no framework, the build output defaults to the repository itself, which for a Brand Brain means every confidential folder. A mode that skipped those steps would leave `deploy.yml` with two disjoint step lists behind one `if:` per step, and every change to one path would risk the other. The two share what is genuinely shared, the GitHub deployment lifecycle in `github-deployment.cjs`, and nothing else.
+
+There is no `stage` environment: no static caller needs one yet, and adding it later is additive.
+
+#### Why only an allowlist is uploaded
+
+A denylist fails open: a folder added to the repository later (call notes, strategy, anything confidential) is published until someone remembers to exclude it. An allowlist fails closed. `vercel deploy --prebuilt` uploads only `.vercel/output`, so the staging script is the one place that decides what leaves the runner. No step runs `vercel build` or `vercel pull`, and the tests fail if one is added. Symlinks are excluded because they are the one way an allowlisted folder can still reach a file outside it.
+
+The staging script is bash, like every other script here: `find -P` never follows a symlink, the rules fit on one screen, and the tests run in the same harness as the other `test-*.sh`, with no runtime to install or pin.
+
+#### Why the Vercel CLI is pinned
+
+`deploy.yml` installs `vercel@latest`. Here `vercel-version` defaults to an exact version (`65.7.0`) and rejects anything else. The job uses one CLI command, and a new release could change what `--prebuilt` uploads, or how it treats the project settings. On a repository whose point is to keep most of its contents private, that change should arrive as a reviewed bump to the default, not on the next run. Dependabot does not track it: bump it by hand after checking the CLI's release notes.
+
 ### Reusable workflow: `release.yml`
 
 Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing. The publish target is selected by the `registry` input:
