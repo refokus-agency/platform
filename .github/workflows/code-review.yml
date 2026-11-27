@@ -921,7 +921,7 @@ jobs:
         # be exposed as a workflow input. Do not hand-edit the SHA — Dependabot's weekly
         # github-actions run bumps it and its version comment together, and the pin-check
         # gate rejects a comment that does not match its SHA.
-        uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
+        uses: anthropics/claude-code-action@eb56b6666facdbd501035f4a0269d8caee2e7a8b # v1.0.289
         with:
           # The composed prompt, not `inputs.prompt`: the caller's text plus the context blocks.
           prompt: ${{ steps.context.outputs.prompt }}
