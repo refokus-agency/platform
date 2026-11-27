@@ -6,6 +6,10 @@
 # Vercel. Dotfiles, dot-folders and symlinks inside them are never published, and each folder's
 # own README.md is left out unless you set `exclude-readmes: false`.
 #
+# Deploy production once before the first preview (main-production-static.yml, or Actions ->
+# Run workflow on main). Vercel makes a project's first deployment production, so a preview is
+# refused while the project has no production deployment.
+#
 # Optional: add a `paths:` filter under `pull_request:` (e.g. `paths: ['wireframes/**',
 # 'artifacts/**']`) so pull requests that touch neither folder don't deploy.
 #

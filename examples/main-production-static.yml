@@ -9,6 +9,9 @@
 # Optional: add a `paths:` filter under `push:` (e.g. `paths: ['wireframes/**', 'artifacts/**']`)
 # so pushes that touch neither folder don't redeploy.
 #
+# Run this once before the first preview: pr-preview-static.yml refuses previews until the
+# Vercel project has a production deployment.
+#
 # workflow_dispatch is kept as an escape hatch — lets you re-run a production deploy from the
 # Actions tab without pushing a new commit, e.g. after changing the Vercel project settings.
 #

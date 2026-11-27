@@ -108,6 +108,61 @@ EOF
   : >"$NPX_LOG"
 }
 
+# A stub `curl` for the Vercel API. Logs each URL to $CURL_LOG and the header it was given to
+# $CURL_HEADERS, refuses a token on the command line, and answers by endpoint:
+#   /v7/deployments   -> $LIST_CODE / $LIST_BODY   (the production pre-check)
+#   /v13/deployments/ -> $GET_CODE  / $GET_BODY    (the target read-back)
+# A code of `fail` makes curl itself fail, as on a network error.
+stub_curl() {
+  mkdir -p "$T/bin"
+  cat >"$T/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+out='' fmt='' url=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift ;;
+    -w) fmt=$2; shift ;;
+    -H) case "$2" in @*) cat "${2#@}" >>"$CURL_HEADERS" ;; *) echo "header on argv: $2" >>"$CURL_HEADERS" ;; esac; shift ;;
+    --retry|--max-time) shift ;;
+    -*) ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+printf '%s\n' "$url" >>"$CURL_LOG"
+case "$url" in
+  */v7/deployments\?*) code=$LIST_CODE body=$LIST_BODY ;;
+  */v13/deployments/*) code=$GET_CODE body=$GET_BODY ;;
+  *) code=404 body='{}' ;;
+esac
+[ "$code" = fail ] && { echo "curl: (6) Could not resolve host" >&2; exit 6; }
+printf '%s' "$body" >"$out"
+[ "$fmt" = '%{http_code}' ] && printf '%s' "$code"
+exit 0
+EOF
+  chmod +x "$T/bin/curl"
+  export CURL_LOG="$T/curl.log" CURL_HEADERS="$T/curl.headers"
+  export LIST_CODE=200 LIST_BODY='{"deployments":[{"uid":"dpl_1","target":"production"}]}'
+  export GET_CODE=200 GET_BODY='{"uid":"dpl_2","target":null}'
+  : >"$CURL_LOG"
+  : >"$CURL_HEADERS"
+}
+curl_calls() { grep -c . "$CURL_LOG" 2>/dev/null || true; }
+expect_curl_calls() {
+  local got
+  got=$(curl_calls)
+  [ "$got" -eq "$1" ]
+  # Saved first: the command substitution in check's message would reset $? before it is read.
+  local rc=$?
+  check "$1 Vercel API call(s) (got $got: $(tr '\n' ' ' <"$CURL_LOG"))" "$rc"
+}
+token_kept_out_of_argv() {
+  grep -qxF "Authorization: Bearer tok" "$CURL_HEADERS"; check "token sent as a header from a file" $?
+  ! grep -q 'header on argv' "$CURL_HEADERS"; check "no header on the command line" $?
+  ! grep -qF -- 'tok' "$CURL_LOG"; check "token not in the URL" $?
+  ! printf '%s' "$ERR" | grep -qw -- 'tok'; check "token never printed" $?
+}
+
 # --- staging rules ---------------------------------------------------------------------------
 
 # Rule 2: only the listed folders, at the same relative paths, byte for byte.
@@ -402,24 +457,144 @@ deploy_env() { export ENVIRONMENT=$1 VERCEL_VERSION=65.7.0 VERCEL_TOKEN=tok VERC
 case_deploy_preview() {
   step_script "Vercel deploy"
   stub_npx "https://brand-brain-abc123.vercel.app"
+  stub_curl
   deploy_env preview
   run_step
   expect_rc 0
   local calls
   calls=$(cat "$NPX_LOG")
-  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --token tok" ]; check "preview: no --prod (got: $calls)" $?
+  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --environment preview --token tok" ]
+  check "preview: explicit --environment preview, no --prod (got: $calls)" $?
   [ "$OUTPUTS" = "url=https://brand-brain-abc123.vercel.app" ]; check "url output (got: $OUTPUTS)" $?
+  # The target is read back for the deployment the CLI reported.
+  expect_curl_calls 1
+  grep -qxF "https://api.vercel.com/v13/deployments/brand-brain-abc123.vercel.app?teamId=org" "$CURL_LOG"
+  local rc=$?
+  check "read back brand-brain-abc123.vercel.app (got: $(cat "$CURL_LOG"))" "$rc"
+  token_kept_out_of_argv
+}
+
+# The read-back finds the preview went to production: the job fails loudly and reports no URL.
+case_deploy_preview_became_production() {
+  step_script "Vercel deploy"
+  stub_npx "https://brand-brain-abc123.vercel.app"
+  stub_curl
+  export GET_BODY='{"uid":"dpl_2","target":"production"}'
+  deploy_env preview
+  run_step
+  expect_rc 1
+  says "::error::https://brand-brain-abc123.vercel.app was deployed as a preview but Vercel reports target 'production'"
+  [ -z "$OUTPUTS" ]; check "no url output (got: $OUTPUTS)" $?
+}
+
+# A read-back that fails or can't be read fails the job too: an unconfirmed preview is not reported.
+case_deploy_preview_readback_error() {
+  step_script "Vercel deploy"
+  stub_npx "https://brand-brain-abc123.vercel.app"
+  deploy_env preview
+  local code
+  for code in 404 500 fail; do
+    stub_curl
+    export GET_CODE=$code
+    run_step
+    expect_rc 1
+    says "Could not confirm that https://brand-brain-abc123.vercel.app is a preview"
+    [ -z "$OUTPUTS" ]; check "no url output on HTTP $code (got: $OUTPUTS)" $?
+  done
+  stub_curl
+  export GET_BODY='not json'
+  run_step
+  expect_rc 1
+  says "Vercel reports target 'unreadable'"
 }
 
 case_deploy_production() {
   step_script "Vercel deploy"
   stub_npx "https://brand-brain-abc123.vercel.app"
+  stub_curl
   deploy_env production
   run_step
   expect_rc 0
   local calls
   calls=$(cat "$NPX_LOG")
   [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --prod --token tok" ]; check "production: --prod (got: $calls)" $?
+  expect_curl_calls 0
+}
+
+# --- production pre-check (previews only) ----------------------------------------------------
+
+precheck_env() { export VERCEL_TOKEN=tok VERCEL_ORG_ID=team_abc VERCEL_PROJECT_ID=prj_123; }
+
+case_precheck_has_production() {
+  step_script "Check the project has a production deployment"
+  stub_curl
+  precheck_env
+  run_step
+  expect_rc 0
+  says "has a production deployment"
+  expect_curl_calls 1
+  grep -qxF "https://api.vercel.com/v7/deployments?projectId=prj_123&teamId=team_abc&target=production&state=READY&limit=1" "$CURL_LOG"
+  local rc=$?
+  check "asked for the project's READY production deployments (got: $(cat "$CURL_LOG"))" "$rc"
+  token_kept_out_of_argv
+}
+
+case_precheck_no_production() {
+  step_script "Check the project has a production deployment"
+  stub_curl
+  export LIST_BODY='{"deployments":[],"pagination":{"count":0}}'
+  precheck_env
+  run_step
+  expect_rc 1
+  says "::error::Preview refused: the Vercel project has no production deployment yet."
+  says "Vercel makes a project's first deployment production"
+  says "Deploy production once from the default branch"
+  token_kept_out_of_argv
+}
+
+# Any answer other than a readable 200 refuses the preview: unknown is not safe.
+case_precheck_api_error() {
+  step_script "Check the project has a production deployment"
+  precheck_env
+  local code
+  for code in 401 403 404 500 fail; do
+    stub_curl
+    export LIST_CODE=$code
+    run_step
+    expect_rc 1
+    says "Preview refused: could not check for a production deployment"
+    token_kept_out_of_argv
+  done
+  says "(Vercel API HTTP 000)"
+  stub_curl
+  export LIST_BODY='<html>oops</html>'
+  run_step
+  expect_rc 1
+  says "could not read the Vercel API's list of production deployments"
+}
+
+# Ids go into the URL, so anything but a plain id is refused before any call.
+case_precheck_bad_ids() {
+  step_script "Check the project has a production deployment"
+  stub_curl
+  precheck_env
+  export VERCEL_PROJECT_ID='prj_1&target=preview'
+  run_step
+  expect_rc 1
+  says "VERCEL_PROJECT_ID is not a Vercel id"
+  expect_curl_calls 0
+}
+
+# The pre-check runs only for previews, and before the GitHub deployment and the deploy.
+case_precheck_wiring() {
+  local check_i start_i deploy_i
+  [ "$(yq '.jobs.deploy.steps[] | select(.name == "Check the project has a production deployment") | .if' "$WF")" = "\${{ inputs.environment == 'preview' }}" ]
+  check "pre-check runs for previews only" $?
+  check_i=$(yq '.jobs.deploy.steps | to_entries | .[] | select(.value.name == "Check the project has a production deployment") | .key' "$WF")
+  start_i=$(yq '.jobs.deploy.steps | to_entries | .[] | select(.value.name == "Start GitHub deployment") | .key' "$WF")
+  deploy_i=$(yq '.jobs.deploy.steps | to_entries | .[] | select(.value.name == "Vercel deploy") | .key' "$WF")
+  [ -n "$check_i" ] && [ "$check_i" -lt "$start_i" ] && [ "$check_i" -lt "$deploy_i" ]
+  check "pre-check runs before the GitHub deployment and the deploy" $?
 }
 
 # Anything but a bare https URL on the last stdout line fails the step and writes no output.
@@ -442,7 +617,9 @@ ALL=(allowlist any_folders dotfiles symlinks symlinked_folder readmes keep_readm
   invalid_folders no_folders missing_folder empty_output wipes_previous duplicate_folder
   out_dir_is_root usage no_inline_expressions only_prebuilt_deploy contract check_ok
   check_missing_secrets check_bad_inputs stage_step stage_step_old_platform_ref deploy_preview
-  deploy_production deploy_bad_url)
+  deploy_preview_became_production deploy_preview_readback_error deploy_production deploy_bad_url
+  precheck_has_production precheck_no_production precheck_api_error precheck_bad_ids
+  precheck_wiring)
 [ $# -gt 0 ] && ALL=("$@")
 
 failed=()

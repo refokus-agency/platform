@@ -33,7 +33,7 @@ Pick the workflow files that match **the triggers your repo cares about** and co
 | An npm library (release to public npm) | `pr-ci.yml` + `main-release-npm.yml` — needs `id-token: write` and a Trusted Publisher on npmjs.org; see [docs/secrets.md](docs/secrets.md) |
 | A Vercel-deployed app, 2 envs (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
 | A Vercel-deployed app, 3 envs (preview on PR, stage on main, prod on a `production` branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
-| A repo that is not a Node project and publishes only some folders (e.g. a Brand Brain's `wireframes/` and `artifacts/`) | `pr-preview-static.yml` + `main-production-static.yml` — only the folders listed in `folders` are uploaded; see [docs/architecture.md](docs/architecture.md#reusable-workflow-deploy-staticyml) |
+| A repo that is not a Node project and publishes only some folders (e.g. a Brand Brain's `wireframes/` and `artifacts/`) | `pr-preview-static.yml` + `main-production-static.yml` — only the folders listed in `folders` are uploaded. Deploy production once before the first preview: previews are refused until the Vercel project has a production deployment. See [docs/architecture.md](docs/architecture.md#reusable-workflow-deploy-staticyml) |
 
 The shape is **per repo**, not per project type. A service can be 2-env or 3-env. A Webflow custom-code site can be 2-env if you don't need a stage gate. Pick the combo that matches your flow.
 
