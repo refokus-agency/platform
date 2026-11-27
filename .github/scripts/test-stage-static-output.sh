@@ -329,10 +329,33 @@ case_duplicate_folder() {
 
 case_out_dir_is_root() {
   put "wireframes/home.html" home
-  stage . . wireframes
-  expect_rc 2
-  says "must not be the repository root"
-  [ -f "$REPO/DESIGN.md" ]; check "repo not wiped" $?
+  local bad
+  for bad in . ./ "$REPO" "$REPO/." wireframes/..; do
+    stage . "$bad" wireframes
+    expect_rc 2
+    says "must be a directory inside the repository"
+    [ -f "$REPO/DESIGN.md" ]; check "repo not wiped (out-dir '$bad')" $?
+  done
+}
+
+# An ancestor of the repository, or anywhere outside it, is refused before anything is wiped.
+case_out_dir_outside_repo() {
+  put "wireframes/home.html" home
+  mkdir -p "$T/elsewhere"
+  printf 'keep' >"$T/elsewhere/sentinel"
+  ln -s "$T/elsewhere" "$REPO/link"
+  local bad
+  for bad in .. ../.. / "$T" "$T/elsewhere" ../elsewhere link link/out .vercel/../../elsewhere; do
+    stage . "$bad" wireframes
+    expect_rc 2
+    says "must be a directory inside the repository"
+    [ -f "$REPO/DESIGN.md" ]; check "repo not wiped (out-dir '$bad')" $?
+    [ "$(cat "$T/elsewhere/sentinel" 2>/dev/null)" = keep ]; check "outside dir not wiped (out-dir '$bad')" $?
+  done
+  # A nested out-dir that does not exist yet, given as an absolute path, is fine.
+  stage . "$REPO/.vercel/output" wireframes
+  expect_rc 0
+  expect_staged wireframes/home.html
 }
 
 case_usage() {
@@ -438,6 +461,19 @@ case_stage_step() {
   run_step
   expect_rc 0
   expect_staged artifacts/x.html wireframes/README.md wireframes/home.html
+  # A `folders: |` block: one per line, every line is published, not only the first.
+  export FOLDERS=$'wireframes\nartifacts\n' EXCLUDE_READMES=true
+  run_step
+  expect_rc 0
+  expect_staged artifacts/x.html wireframes/home.html
+  export FOLDERS=$'  wireframes\n\tartifacts  \n\n'
+  run_step
+  expect_rc 0
+  expect_staged artifacts/x.html wireframes/home.html
+  export FOLDERS=$'wireframes\n../docs'
+  run_step
+  expect_rc 2
+  says "'../docs' is not a plain top-level folder name"
   export FOLDERS="wireframes ../docs"
   run_step
   expect_rc 2
@@ -452,7 +488,7 @@ case_stage_step_old_platform_ref() {
   says "is missing at platform-ref 'v2.1.0'"
 }
 
-deploy_env() { export ENVIRONMENT=$1 VERCEL_VERSION=65.7.0 VERCEL_TOKEN=tok VERCEL_ORG_ID=org VERCEL_PROJECT_ID=prj; }
+deploy_env() { export ENVIRONMENT=$1 VERCEL_VERSION=65.7.0 VERCEL_TOKEN=tok VERCEL_ORG_ID=team_abc VERCEL_PROJECT_ID=prj; }
 
 case_deploy_preview() {
   step_script "Vercel deploy"
@@ -463,15 +499,30 @@ case_deploy_preview() {
   expect_rc 0
   local calls
   calls=$(cat "$NPX_LOG")
-  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --environment preview --token tok" ]
+  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --environment preview" ]
   check "preview: explicit --environment preview, no --prod (got: $calls)" $?
   [ "$OUTPUTS" = "url=https://brand-brain-abc123.vercel.app" ]; check "url output (got: $OUTPUTS)" $?
   # The target is read back for the deployment the CLI reported.
   expect_curl_calls 1
-  grep -qxF "https://api.vercel.com/v13/deployments/brand-brain-abc123.vercel.app?teamId=org" "$CURL_LOG"
+  grep -qxF "https://api.vercel.com/v13/deployments/brand-brain-abc123.vercel.app?teamId=team_abc" "$CURL_LOG"
   local rc=$?
   check "read back brand-brain-abc123.vercel.app (got: $(cat "$CURL_LOG"))" "$rc"
   token_kept_out_of_argv
+  ! grep -qw -- 'tok' "$NPX_LOG"; check "token not on the vercel command line (got: $calls)" $?
+}
+
+# A personal scope: VERCEL_ORG_ID is a user id, so no teamId is sent.
+case_deploy_preview_personal_scope() {
+  step_script "Vercel deploy"
+  stub_npx "https://brand-brain-abc123.vercel.app"
+  stub_curl
+  deploy_env preview
+  export VERCEL_ORG_ID=user_abc
+  run_step
+  expect_rc 0
+  grep -qxF "https://api.vercel.com/v13/deployments/brand-brain-abc123.vercel.app" "$CURL_LOG"
+  local rc=$?
+  check "read back without teamId (got: $(cat "$CURL_LOG"))" "$rc"
 }
 
 # The read-back finds the preview went to production: the job fails loudly and reports no URL.
@@ -501,11 +552,16 @@ case_deploy_preview_readback_error() {
     says "Could not confirm that https://brand-brain-abc123.vercel.app is a preview"
     [ -z "$OUTPUTS" ]; check "no url output on HTTP $code (got: $OUTPUTS)" $?
   done
-  stub_curl
-  export GET_BODY='not json'
-  run_step
-  expect_rc 1
-  says "Vercel reports target 'unreadable'"
+  # Not JSON, or JSON without a `target` key (an empty or error body), confirms nothing.
+  local body
+  for body in 'not json' '{}' '{"error":{"code":"not_found"}}' '[]'; do
+    stub_curl
+    export GET_BODY=$body
+    run_step
+    expect_rc 1
+    says "Vercel reports target 'unreadable'"
+    [ -z "$OUTPUTS" ]; check "no url output for body '$body' (got: $OUTPUTS)" $?
+  done
 }
 
 case_deploy_production() {
@@ -517,8 +573,15 @@ case_deploy_production() {
   expect_rc 0
   local calls
   calls=$(cat "$NPX_LOG")
-  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --prod --token tok" ]; check "production: --prod (got: $calls)" $?
+  [ "$calls" = "--yes vercel@65.7.0 deploy --prebuilt --prod" ]; check "production: --prod (got: $calls)" $?
   expect_curl_calls 0
+}
+
+# The CLI gets the token from the step's env, never from argv.
+case_deploy_token_from_env() {
+  [ "$(yq '.jobs.deploy.steps[] | select(.name == "Vercel deploy") | .env.VERCEL_TOKEN' "$WF")" = '${{ secrets.VERCEL_TOKEN }}' ]
+  check "VERCEL_TOKEN set in the deploy step's env" $?
+  ! yq '.jobs.deploy.steps[] | .run // ""' "$WF" | grep -qE -- '--token'; check "no --token flag anywhere" $?
 }
 
 # --- production pre-check (previews only) ----------------------------------------------------
@@ -537,6 +600,19 @@ case_precheck_has_production() {
   local rc=$?
   check "asked for the project's READY production deployments (got: $(cat "$CURL_LOG"))" "$rc"
   token_kept_out_of_argv
+}
+
+# A personal scope: VERCEL_ORG_ID is a user id, which the API rejects as a teamId.
+case_precheck_personal_scope() {
+  step_script "Check the project has a production deployment"
+  stub_curl
+  precheck_env
+  export VERCEL_ORG_ID=user_abc
+  run_step
+  expect_rc 0
+  grep -qxF "https://api.vercel.com/v7/deployments?projectId=prj_123&target=production&state=READY&limit=1" "$CURL_LOG"
+  local rc=$?
+  check "no teamId for a personal scope (got: $(cat "$CURL_LOG"))" "$rc"
 }
 
 case_precheck_no_production() {
@@ -615,11 +691,12 @@ case_deploy_bad_url() {
 
 ALL=(allowlist any_folders dotfiles symlinks symlinked_folder readmes keep_readmes spaces
   invalid_folders no_folders missing_folder empty_output wipes_previous duplicate_folder
-  out_dir_is_root usage no_inline_expressions only_prebuilt_deploy contract check_ok
-  check_missing_secrets check_bad_inputs stage_step stage_step_old_platform_ref deploy_preview
-  deploy_preview_became_production deploy_preview_readback_error deploy_production deploy_bad_url
-  precheck_has_production precheck_no_production precheck_api_error precheck_bad_ids
-  precheck_wiring)
+  out_dir_is_root out_dir_outside_repo usage no_inline_expressions only_prebuilt_deploy contract
+  check_ok check_missing_secrets check_bad_inputs stage_step stage_step_old_platform_ref
+  deploy_preview deploy_preview_personal_scope deploy_preview_became_production
+  deploy_preview_readback_error deploy_production deploy_token_from_env deploy_bad_url
+  precheck_has_production precheck_personal_scope precheck_no_production precheck_api_error
+  precheck_bad_ids precheck_wiring)
 [ $# -gt 0 ] && ALL=("$@")
 
 failed=()

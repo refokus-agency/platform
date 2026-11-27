@@ -6,6 +6,10 @@
 # Vercel. Dotfiles, dot-folders and symlinks inside them are never published, and each folder's
 # own README.md is left out unless you set `exclude-readmes: false`.
 #
+# The Vercel project must NOT be connected to Git: a Git-connected project also deploys the whole
+# repository from Vercel's side on every push, bypassing the allowlist. Create it with the CLI
+# (`vercel project add <name>`) or disconnect Git under Project Settings -> Git.
+#
 # Optional: add a `paths:` filter under `push:` (e.g. `paths: ['wireframes/**', 'artifacts/**']`)
 # so pushes that touch neither folder don't redeploy.
 #

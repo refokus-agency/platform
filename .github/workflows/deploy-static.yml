@@ -18,7 +18,8 @@ on:
         default: ''
       folders:
         description: |
-          Space-separated top-level folders to publish, e.g. 'wireframes artifacts'. Each must be
+          Top-level folders to publish, separated by spaces or newlines, e.g. 'wireframes artifacts'
+          or a `folders: |` block with one per line. Each must be
           a plain folder name: no '/', not starting with '.' or '-'. Nothing outside these folders
           is uploaded. Dotfiles, dot-folders and symlinks inside them are never published.
         required: false
@@ -40,7 +41,12 @@ on:
         type: string
         default: '65.7.0'
       platform-ref:
-        description: Ref of the platform repo to checkout for its scripts.
+        description: |
+          Ref of the platform repo to checkout for its scripts (stage-static-output.sh,
+          github-deployment.cjs). Defaults to main, like every reusable here, and does not follow
+          the ref in your `uses:` line: a caller on @v2 stages with the publishing rules on
+          platform's main at run time. Set it to the same ref as `uses:` (e.g. v2.2.0) to pin the
+          rules too. See docs/architecture.md -> "Why does each reusable re-checkout the platform repo?".
         required: false
         type: string
         default: main
@@ -130,7 +136,9 @@ jobs:
             echo "::error::$script is missing at platform-ref '$PLATFORM_REF'. Use a platform-ref that ships deploy-static.yml."
             exit 1
           fi
-          read -r -a folders <<<"$FOLDERS"
+          # Split on any whitespace, newlines included: `folders: |` with one folder per line must
+          # publish every line, not only the first. read returns 1 at end of input with -d ''.
+          read -r -d '' -a folders <<<"$FOLDERS" || true
           flags=()
           if [ "$EXCLUDE_READMES" != "true" ]; then flags+=(--keep-readmes); fi
           bash "$script" ${flags[@]+"${flags[@]}"} . .vercel/output "${folders[@]}"
@@ -154,12 +162,16 @@ jobs:
           for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             [[ "${!name}" =~ ^[A-Za-z0-9_-]+$ ]] || refuse "$name is not a Vercel id."
           done
+          # teamId only for a team scope: for a personal account VERCEL_ORG_ID is a user id, which
+          # the API does not accept as a teamId.
+          team_param=""
+          if [[ "$VERCEL_ORG_ID" == team_* ]]; then team_param="&teamId=${VERCEL_ORG_ID}"; fi
           body=$(mktemp)
           trap 'rm -f "$body"' EXIT
           # The token goes in a header read from a file descriptor: never on the command line.
           code=$(curl -sS --retry 2 --max-time 30 -o "$body" -w '%{http_code}' \
             -H @<(printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN") \
-            "https://api.vercel.com/v7/deployments?projectId=${VERCEL_PROJECT_ID}&teamId=${VERCEL_ORG_ID}&target=production&state=READY&limit=1") || code=000
+            "https://api.vercel.com/v7/deployments?projectId=${VERCEL_PROJECT_ID}${team_param}&target=production&state=READY&limit=1") || code=000
           [ "$code" = 200 ] || refuse "could not check for a production deployment (Vercel API HTTP $code)."
           count=$(jq -r '.deployments | length' "$body" 2>/dev/null) || count=""
           [[ "$count" =~ ^[0-9]+$ ]] || refuse "could not read the Vercel API's list of production deployments."
@@ -206,8 +218,10 @@ jobs:
             production) target_flags=(--prod) ;;
             *) target_flags=(--environment preview) ;;
           esac
-          # The CLI prints the deployment URL on stdout and its progress on stderr.
-          out=$(npx --yes "vercel@${VERCEL_VERSION}" deploy --prebuilt "${target_flags[@]}" --token "$VERCEL_TOKEN")
+          # The CLI prints the deployment URL on stdout and its progress on stderr. It reads the
+          # token from the VERCEL_TOKEN env var (and the scope from VERCEL_ORG_ID and
+          # VERCEL_PROJECT_ID), so the token never appears on a command line.
+          out=$(npx --yes "vercel@${VERCEL_VERSION}" deploy --prebuilt "${target_flags[@]}")
           url=$(printf '%s\n' "$out" | tail -n 1 | tr -d '[:space:]')
           if ! [[ "$url" =~ ^https://[A-Za-z0-9.-]+$ ]]; then
             echo "::error::vercel deploy did not print a deployment URL (last line: '$url')."
@@ -217,16 +231,21 @@ jobs:
           # Defence in depth for the pre-check: read the target back. It cannot undo a preview that
           # went to production, but it fails the job instead of reporting a preview.
           if [ "$ENVIRONMENT" = "preview" ]; then
+            # teamId only for a team scope, as in the pre-check.
+            team_query=""
+            if [[ "$VERCEL_ORG_ID" == team_* ]]; then team_query="?teamId=${VERCEL_ORG_ID}"; fi
             body=$(mktemp)
             trap 'rm -f "$body"' EXIT
             code=$(curl -sS --retry 2 --max-time 30 -o "$body" -w '%{http_code}' \
               -H @<(printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN") \
-              "https://api.vercel.com/v13/deployments/${url#https://}?teamId=${VERCEL_ORG_ID}") || code=000
+              "https://api.vercel.com/v13/deployments/${url#https://}${team_query}") || code=000
             if [ "$code" != 200 ]; then
               echo "::error::Could not confirm that $url is a preview (Vercel API HTTP $code). Check its target in the Vercel dashboard."
               exit 1
             fi
-            target=$(jq -r '.target // "preview"' "$body" 2>/dev/null) || target=""
+            # A preview's target is null. A body without the key at all ({} or an error object)
+            # confirms nothing, so it is refused like an unreadable one.
+            target=$(jq -er 'if has("target") then (.target // "preview") else error("no target") end' "$body" 2>/dev/null) || target=""
             if [ "$target" != "preview" ]; then
               echo "::error::$url was deployed as a preview but Vercel reports target '${target:-unreadable}'. If that is production, it is now live on the production domain: redeploy production from the default branch, or roll back in the Vercel dashboard."
               exit 1

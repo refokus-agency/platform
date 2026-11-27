@@ -33,7 +33,7 @@ Common combinations:
 | Library (release on main) | `pr-ci.yml` + `main-release.yml` |
 | Vercel 2-env (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
 | Vercel 3-env (preview on PR, stage on main, prod on production branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
-| Static folders, no Node project (e.g. a Brand Brain) | `pr-preview-static.yml` + `main-production-static.yml`, with `folders:` set to what you publish |
+| Static folders, no Node project (e.g. a Brand Brain) | `pr-preview-static.yml` + `main-production-static.yml`, with `folders:` set to what you publish. The Vercel project must not be connected to Git: see [architecture.md](architecture.md#reusable-workflow-deploy-staticyml) |
 
 If your repo has a shape not listed, combine the atomic files that match your triggers. The reusables work fine in any valid combo.
 

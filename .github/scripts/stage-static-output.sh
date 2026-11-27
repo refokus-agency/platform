@@ -7,7 +7,8 @@
 # Usage:
 #   stage-static-output.sh [--keep-readmes] <repo-root> <out-dir> <folder>...
 #
-# Wipes <out-dir>, then writes <out-dir>/config.json ({"version":3}) and
+# <out-dir> must resolve to a directory inside <repo-root> (not the root itself, an ancestor of
+# it or anywhere outside it), because it is wiped. Wipes <out-dir>, then writes <out-dir>/config.json ({"version":3}) and
 # <out-dir>/static/<path relative to repo-root> for every file it publishes.
 #
 # The rules, in the order they apply:
@@ -25,7 +26,8 @@
 #      deeper down belongs to the content next to it and is published.
 #
 # Prints each published path on stdout, then each excluded path with its reason, then a count.
-# Exit codes: 0 staged (possibly nothing); 2 usage error or an invalid folder name.
+# Exit codes: 0 staged (possibly nothing); 2 usage error, an invalid folder name or an <out-dir>
+# outside the repository.
 
 set -euo pipefail
 
@@ -76,11 +78,30 @@ case "$OUT_DIR" in
   *) OUT_DIR="$PWD/$OUT_DIR" ;;
 esac
 cd "$REPO_ROOT"
-# It is wiped below: never let that be the checkout itself.
-if [ -d "$OUT_DIR" ] && [ "$(cd "$OUT_DIR" && pwd -P)" = "$(pwd -P)" ]; then
-  echo "error: <out-dir> must not be the repository root." >&2
-  exit 2
-fi
+
+# <out-dir> is wiped below, so it must resolve to a directory strictly inside the repository:
+# never the root, an ancestor of it, or anything outside it. `..` is refused outright. The
+# deepest part that exists is resolved with `pwd -P` (symlinks included), and the parts that
+# do not exist yet are appended as they are.
+resolve_out_dir() {
+  local path=$1 rest="" base
+  case "/$path/" in */../*) return 1 ;; esac
+  while [ ! -d "$path" ]; do
+    base=$(basename "$path")
+    [ "$base" = "." ] || rest="/$base$rest"
+    path=$(dirname "$path")
+  done
+  printf '%s%s\n' "$(cd "$path" && pwd -P)" "$rest"
+}
+REPO_REAL=$(pwd -P)
+OUT_REAL=$(resolve_out_dir "$OUT_DIR") || OUT_REAL=""
+case "$OUT_REAL" in
+  "$REPO_REAL"/?*) ;;
+  *)
+    echo "error: <out-dir> must be a directory inside the repository, not its root, an ancestor of it or outside it (got: $OUT_DIR)." >&2
+    exit 2
+    ;;
+esac
 
 INCLUDED=()
 EXCLUDED=()  # "<reason> <path>"
