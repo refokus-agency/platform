@@ -23,6 +23,8 @@ The workflows in [`examples/`](../examples/) are **atomic**: each file handles o
 | `main-production.yml` | push to `main` | CI + production deploy |
 | `production-deploy.yml` | push to `production` | CI + production deploy |
 | `main-release.yml` | push to `main` | CI + semantic-release |
+| `pr-preview-static.yml` | PR | preview deploy of allowlisted static folders |
+| `main-production-static.yml` | push to `main` | production deploy of allowlisted static folders |
 
 Common combinations:
 
@@ -31,6 +33,7 @@ Common combinations:
 | Library (release on main) | `pr-ci.yml` + `main-release.yml` |
 | Vercel 2-env (preview on PR, prod on main) | `pr-preview.yml` + `main-production.yml` |
 | Vercel 3-env (preview on PR, stage on main, prod on production branch) | `pr-preview.yml` + `main-stage.yml` + `production-deploy.yml` |
+| Static folders, no Node project (e.g. a Brand Brain) | `pr-preview-static.yml` + `main-production-static.yml`, with `folders:` set to what you publish. The Vercel project must not be connected to Git: see [architecture.md](architecture.md#reusable-workflow-deploy-staticyml) |
 
 If your repo has a shape not listed, combine the atomic files that match your triggers. The reusables work fine in any valid combo.
 
@@ -99,9 +102,9 @@ Your repo needs these secrets available (via org inheritance or repo-level):
 | Secret | Needed by | Expected level |
 |---|---|---|
 | `GITHUB_TOKEN` | all workflows | **automatic** (built-in) |
-| `VERCEL_TOKEN` | `deploy.yml` | org |
-| `VERCEL_ORG_ID` | `deploy.yml` | org |
-| `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** (each project has its own) |
+| `VERCEL_TOKEN` | `deploy.yml`, `deploy-static.yml` | org |
+| `VERCEL_ORG_ID` | `deploy.yml`, `deploy-static.yml` | org |
+| `VERCEL_PROJECT_ID` | `deploy.yml`, `deploy-static.yml` | **repo** (each project has its own) |
 
 `GITHUB_TOKEN` is generated automatically — no setup needed. The reusables consume it for cloning the public `refokus-agency/platform` and authing GitHub Packages installs (using the `permissions: contents: read, packages: read` declared in the example callers). `pr-preview.yml` additionally declares `pull-requests: write` so `deploy.yml` can post the preview URL as a PR comment, and `deployments: write` so it can record the preview as a GitHub deployment. The preview deploy fails without `deployments: write`; the stage and production callers declare it too, but there it is optional (a missing grant only logs a warning). See [architecture.md → `deploy.yml`](architecture.md#reusable-workflow-deployyml).
 

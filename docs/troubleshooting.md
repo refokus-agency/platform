@@ -107,6 +107,25 @@ Error: Multiple versions of pnpm specified:
 - Remove `pnpm-version` from the caller's `with:` block (recommended). The setup action then uses the version `package.json` declares, and the `Resolve pnpm version` step logs `source: packageManager`.
 - Or pass the exact version `package.json` pins: `pnpm-version: '11.17.0'`. You then have two places to keep in sync.
 
+## Static preview refused: "the Vercel project has no production deployment yet"
+
+**Symptoms:** a `deploy-static.yml` preview fails at `Check the project has a production deployment` with:
+
+```text
+::error::Preview refused: the Vercel project has no production deployment yet. Vercel makes a project's first deployment production, so this preview would go live on the production domain. Deploy production once from the default branch with the production caller (e.g. Actions -> Run workflow on main), then re-run this preview.
+```
+
+The same step says `could not check for a production deployment (Vercel API HTTP <code>)` or `could not read the Vercel API's list of production deployments` when it could not get an answer. It refuses then too, because an unknown answer is not a safe one.
+
+**Cause:** Vercel promotes a project's first deployment to production even without `--prod`. A preview sent to a project that was never deployed to production would replace nothing and go live on `<project>.vercel.app`. That happened once, which is why the check exists.
+
+**Fix:**
+
+- **No production deployment yet:** run the production caller once. With `main-production-static.yml`, that's Actions → Deploy Production → Run workflow on `main`. Then re-run the preview.
+- **HTTP 401 or 403:** `VERCEL_TOKEN` can't read the project's deployments, or `VERCEL_ORG_ID` is not the team that owns it. **404:** `VERCEL_PROJECT_ID` or `VERCEL_ORG_ID` is wrong. **000 or 5xx:** Vercel was unreachable. Re-run the job.
+
+A related error comes after the deploy: `<url> was deployed as a preview but Vercel reports target 'production'`. The pre-check passed, but Vercel still made the deployment production, so it is live on the production domain. The job fails so this doesn't go unnoticed. Redeploy production from the default branch, or roll back in the Vercel dashboard. `Could not confirm that <url> is a preview` means the read-back itself failed. Check the deployment's target in the Vercel dashboard.
+
 ## Deploys work on preview but fail on production
 
 **Symptoms:** `deploy-preview` is green, `deploy-production` fails.

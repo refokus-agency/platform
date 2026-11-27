@@ -54,6 +54,46 @@ The job still declares no `permissions:` block, on purpose: a declared `deployme
 
 `.github/scripts/record-github-deployment.cjs`, the v1 recorder (stage/production, success only), is no longer called by `deploy.yml` but stays in the repo: `platform-ref` defaults to `main`, so `deploy.yml@v1` loads its scripts from `main`, and deleting it there would break every v1 stage and production deploy.
 
+### Reusable workflow: `deploy-static.yml`
+
+Deploys an allowlisted copy of a few top-level folders to Vercel, at `preview` or `production`. It exists for repos that are not Node projects: a Brand Brain is a private repository of client documents with no `package.json` and no lockfile, and it publishes only `wireframes/` and `artifacts/` to its own Vercel project. The caller names the folders (`folders: wireframes artifacts`, or a `folders: |` block with one per line); everything else in the repository stays private.
+
+**The Vercel project must not be connected to Git.** A Git-connected project also deploys every push from Vercel's side, building the whole repository with no allowlist, and that bypasses this workflow entirely. Create the project with the CLI (`vercel project add <name>`) or the API, or, for an existing one, disconnect it under Project Settings → Git. Only this workflow should deploy it.
+
+**The staging rules float with platform's `main`.** Like every reusable here, `platform-ref` defaults to `main`, and `stage-static-output.sh` is loaded from it at run time. A caller on `@v2` therefore publishes with the rules on `main`, not with the ones in the release it pinned (see [Why does each reusable re-checkout the `platform` repo?](#why-does-each-reusable-re-checkout-the-platform-repo)). A change to those rules reaches every static caller when it merges, before any release. Set `platform-ref` to the same ref as the `uses:` line to pin the rules with the workflow.
+
+The job checks the inputs and the three `VERCEL_*` secrets first, naming whatever is missing. It then checks out the caller (on `pull_request`, the head commit, not the merge commit, so what is published matches the SHA the deployment, the comment and the summary report) and platform into `.platform/` for its scripts, and stages `.vercel/output` with [`stage-static-output.sh`](../.github/scripts/stage-static-output.sh): `config.json` (`{"version":3}`) plus `static/<path>` for each published file. It deploys that directory with `vercel deploy --prebuilt` (`--prod` for production) and checks the URL the CLI prints. It records the GitHub deployment with the same `github-deployment.cjs` lifecycle as `deploy.yml`, and on a pull request it keeps one sticky comment per environment with the URL and the head SHA, labelled with the environment (`Vercel preview deploy:` or `Vercel production deploy:`). The comment says the URL may ask for a Vercel login: a project with Deployment Protection serves previews only to signed-in team members. The workflow outputs `url`.
+
+**A preview is refused until production has been deployed once.** Vercel promotes a project's first deployment to production, even without `--prod`, so the first preview on a fresh project would go live on its production domain. This happened in the first live test. Before a preview, the job lists the project's `READY` production deployments (`GET /v7/deployments?target=production`). It refuses the preview when there are none, and also when the API can't answer: unknown is treated as unsafe. Production deploys skip the check, because they are what fixes it. The deploy also passes its target explicitly (`--environment preview` or `--prod`), so the CLI never picks one. Afterwards the job reads the deployment's `target` back (`GET /v13/deployments/<host>`) and fails if a preview came back as production. That can't undo the deploy, but it fails the job instead of reporting a preview. The token never appears on a command line: it reaches `curl` as a header read from a file descriptor, and the Vercel CLI reads it from the `VERCEL_TOKEN` environment variable (no `--token` flag). Both API calls send `teamId` only when `VERCEL_ORG_ID` is a team id (`team_...`); for a personal account it is a user id, which the API does not take as a `teamId`.
+
+Staging runs before the GitHub deployment starts, unlike the build in `deploy.yml`: a bad folder name fails without leaving a failed deployment behind. The PR comment step only ever edits a comment authored by `github-actions[bot]` that carries its marker, so quoting the marker in a human comment cannot get that comment overwritten.
+
+What the staging script publishes, rule by rule (its header and `test-stage-static-output.sh` are the source of truth):
+
+- Each listed folder must be a plain top-level name: no `/`, so no `..`, no absolute or nested path, and not starting with `.` or `-`. Anything else fails before the output directory is touched. A listed name that is not a real folder (missing, a file or a symlink) fails the job too, so a renamed or mistyped folder never drops out of the site silently.
+- Only regular files under those folders are published, at the same relative paths.
+- Dotfiles and dot-folders are left out at any depth, and a dot-folder is never descended into.
+- Symlinks are left out and never followed, including a listed folder that is itself a symlink.
+- With `exclude-readmes` (the default), each folder's own `README.md`, in any case, is left out: it documents the repository for the team. A `README.md` deeper down belongs to the content next to it and is published.
+- At least one file must be published. Folders that are empty, or hold only excluded files, fail the job before the output directory is touched: `vercel deploy --prebuilt --prod` with an empty output would replace the live site with nothing. This applies to previews too.
+- The output directory is wiped first, so a file deleted from the repository disappears on the next deploy. It must resolve to a directory strictly inside the repository: the root, an ancestor of it, a path with `..` and anything outside it (symlinks resolved) are refused before anything is wiped.
+
+#### Why a separate reusable instead of a mode in `deploy.yml`?
+
+`deploy.yml` is built around a Node project. Its `setup` step fails without a lockfile, and `vercel pull` + `vercel build` build the checkout as a project: with no framework, the build output defaults to the repository itself, which for a Brand Brain means every confidential folder. A mode that skipped those steps would leave `deploy.yml` with two disjoint step lists behind one `if:` per step, and every change to one path would risk the other. The two share what is genuinely shared, the GitHub deployment lifecycle in `github-deployment.cjs`, and nothing else.
+
+There is no `stage` environment: no static caller needs one yet, and adding it later is additive.
+
+#### Why only an allowlist is uploaded
+
+A denylist fails open: a folder added to the repository later (call notes, strategy, anything confidential) is published until someone remembers to exclude it. An allowlist fails closed. `vercel deploy --prebuilt` uploads only `.vercel/output`, so the staging script is the one place that decides what leaves the runner. No step runs `vercel build` or `vercel pull`, and the tests fail if one is added. Symlinks are excluded because they are the one way an allowlisted folder can still reach a file outside it.
+
+The staging script is bash, like every other script here: `find -P` never follows a symlink, the rules fit on one screen, and the tests run in the same harness as the other `test-*.sh`, with no runtime to install or pin.
+
+#### Why the Vercel CLI is pinned
+
+`deploy.yml` installs `vercel@latest`. Here `vercel-version` defaults to an exact version (`65.7.0`) and rejects anything else. The job uses one CLI command, and a new release could change what `--prebuilt` uploads, or how it treats the project settings. On a repository whose point is to keep most of its contents private, that change should arrive as a reviewed bump to the default, not on the next run. Dependabot does not track it: bump it by hand after checking the CLI's release notes.
+
 ### Reusable workflow: `release.yml`
 
 Runs semantic-release, which handles version bumps, changelog generation, git tags, and publishing. The publish target is selected by the `registry` input:

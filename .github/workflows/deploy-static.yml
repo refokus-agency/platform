@@ -1,0 +1,346 @@
+name: Deploy static folders to Vercel (reusable)
+
+# Publishes an allowlisted copy of a few top-level folders to Vercel, for repos that are not Node
+# projects (no package.json, no lockfile), such as Brand Brains. Only the staged
+# .vercel/output directory is uploaded (`vercel deploy --prebuilt`), never the checkout: a folder
+# not listed in `folders` cannot reach Vercel, whatever else the repository holds.
+#
+# Why this is not a mode of deploy.yml, why only an allowlist is uploaded and why the CLI is
+# pinned: docs/architecture.md -> "Reusable workflow: deploy-static.yml".
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Vercel environment — preview | production. production deploys with --prod.
+        required: false
+        type: string
+        default: ''
+      folders:
+        description: |
+          Top-level folders to publish, separated by spaces or newlines, e.g. 'wireframes artifacts'
+          or a `folders: |` block with one per line. Each must be
+          a plain folder name: no '/', not starting with '.' or '-'. Nothing outside these folders
+          is uploaded. Dotfiles, dot-folders and symlinks inside them are never published.
+        required: false
+        type: string
+        default: ''
+      exclude-readmes:
+        description: |
+          Leave out each listed folder's own README.md (directly inside it, any case), which
+          documents the repository for the team. A README.md deeper down is published. Default true.
+        required: false
+        type: boolean
+        default: true
+      vercel-version:
+        description: |
+          Exact Vercel CLI version (x.y.z). Pinned, unlike deploy.yml's `latest`: this job needs
+          only `deploy --prebuilt`, and a new CLI release should not change what gets uploaded
+          without a reviewed bump here.
+        required: false
+        type: string
+        default: '65.7.0'
+      platform-ref:
+        description: |
+          Ref of the platform repo to checkout for its scripts (stage-static-output.sh,
+          github-deployment.cjs). Defaults to main, like every reusable here, and does not follow
+          the ref in your `uses:` line: a caller on @v2 stages with the publishing rules on
+          platform's main at run time. Set it to the same ref as `uses:` (e.g. v2.2.0) to pin the
+          rules too. See docs/architecture.md -> "Why does each reusable re-checkout the platform repo?".
+        required: false
+        type: string
+        default: main
+    secrets:
+      # required: false, like every secret in these reusables: a caller without them still starts,
+      # and the first step fails naming the missing ones instead of a Vercel CLI auth error.
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_ORG_ID:
+        required: false
+      VERCEL_PROJECT_ID:
+        required: false
+    outputs:
+      url:
+        description: The Vercel deployment URL, empty when the deploy did not run.
+        value: ${{ jobs.deploy.outputs.url }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # No explicit permissions block on purpose, as in deploy.yml: the job inherits the caller's
+    # grant. Callers need `contents: read` (checkout), `deployments: write` (GitHub deployment;
+    # required for preview, optional for production) and, for preview, `pull-requests: write`
+    # (PR comment). See examples/*-static.yml.
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Check inputs and Vercel secrets
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          FOLDERS: ${{ inputs.folders }}
+          VERCEL_VERSION: ${{ inputs.vercel-version }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        shell: bash
+        run: |
+          failed=0
+          case "$ENVIRONMENT" in
+            preview|production) ;;
+            *) echo "::error::environment must be preview or production (got: '$ENVIRONMENT')."; failed=1 ;;
+          esac
+          if ! [[ "$VERCEL_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::vercel-version must be an exact version such as 65.7.0 (got: '$VERCEL_VERSION')."
+            failed=1
+          fi
+          # The folder names themselves are checked by stage-static-output.sh.
+          if [ -z "${FOLDERS//[[:space:]]/}" ]; then
+            echo "::error::folders is empty. List the top-level folders to publish, e.g. 'wireframes artifacts'."
+            failed=1
+          fi
+          missing=""
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s):$missing. Add them as repository or organization secrets and pass them with 'secrets: inherit' (see docs/secrets.md)."
+            failed=1
+          fi
+          exit "$failed"
+
+      # The pull request head, not the default merge commit: the deployment, the PR comment and
+      # the summary all report the head SHA, so the published content must be that commit.
+      # Elsewhere the pushed commit.
+      - name: Checkout caller repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout platform repo (for its scripts)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: refokus-agency/platform
+          ref: ${{ inputs.platform-ref }}
+          path: .platform
+          persist-credentials: false
+
+      # Before the GitHub deployment starts: a bad folder name fails here without leaving a
+      # failed deployment behind, and staging is cheap.
+      - name: Stage allowlisted folders
+        env:
+          FOLDERS: ${{ inputs.folders }}
+          EXCLUDE_READMES: ${{ inputs.exclude-readmes }}
+          PLATFORM_REF: ${{ inputs.platform-ref }}
+        shell: bash
+        run: |
+          script=.platform/.github/scripts/stage-static-output.sh
+          if [ ! -f "$script" ]; then
+            echo "::error::$script is missing at platform-ref '$PLATFORM_REF'. Use a platform-ref that ships deploy-static.yml."
+            exit 1
+          fi
+          # Split on any whitespace, newlines included: `folders: |` with one folder per line must
+          # publish every line, not only the first. read returns 1 at end of input with -d ''.
+          read -r -d '' -a folders <<<"$FOLDERS" || true
+          flags=()
+          if [ "$EXCLUDE_READMES" != "true" ]; then flags+=(--keep-readmes); fi
+          bash "$script" ${flags[@]+"${flags[@]}"} . .vercel/output "${folders[@]}"
+
+      # Vercel makes a project's first deployment production, even without --prod. A preview sent
+      # to a project that has never been deployed to production would therefore go live on the
+      # production domain. Refuse it, and fail closed when the answer is unknown. Production
+      # deploys skip this check: they are what fixes it.
+      - name: Check the project has a production deployment
+        if: ${{ inputs.environment == 'preview' }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        shell: bash
+        run: |
+          refuse() {
+            echo "::error::Preview refused: $1 Vercel makes a project's first deployment production, so this preview would go live on the production domain. Deploy production once from the default branch with the production caller (e.g. Actions -> Run workflow on main), then re-run this preview."
+            exit 1
+          }
+          for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            [[ "${!name}" =~ ^[A-Za-z0-9_-]+$ ]] || refuse "$name is not a Vercel id."
+          done
+          # teamId only for a team scope: for a personal account VERCEL_ORG_ID is a user id, which
+          # the API does not accept as a teamId.
+          team_param=""
+          if [[ "$VERCEL_ORG_ID" == team_* ]]; then team_param="&teamId=${VERCEL_ORG_ID}"; fi
+          body=$(mktemp)
+          trap 'rm -f "$body"' EXIT
+          # The token goes in a header read from a file descriptor: never on the command line.
+          code=$(curl -sS --retry 2 --max-time 30 -o "$body" -w '%{http_code}' \
+            -H @<(printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN") \
+            "https://api.vercel.com/v7/deployments?projectId=${VERCEL_PROJECT_ID}${team_param}&target=production&state=READY&limit=1") || code=000
+          [ "$code" = 200 ] || refuse "could not check for a production deployment (Vercel API HTTP $code)."
+          count=$(jq -r '.deployments | length' "$body" 2>/dev/null) || count=""
+          [[ "$count" =~ ^[0-9]+$ ]] || refuse "could not read the Vercel API's list of production deployments."
+          [ "$count" -gt 0 ] || refuse "the Vercel project has no production deployment yet."
+          echo "The Vercel project has a production deployment: deploying a preview is safe."
+
+      - name: Start GitHub deployment
+        id: gh-deployment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          # On pull_request, github.sha is the merge commit; the deployment is
+          # recorded against the PR head so it can be looked up by that SHA.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+        with:
+          script: |
+            let start;
+            try {
+              ({ start } = require('./.platform/.github/scripts/github-deployment.cjs'));
+            } catch (error) {
+              // Same rule as onApiError(): preview fails, production warns.
+              const message = `Could not load github-deployment.cjs from platform-ref: ${error.message}`;
+              if (process.env.ENVIRONMENT === 'preview') core.setFailed(message);
+              else core.warning(message);
+              return;
+            }
+            await start({ github, context, core });
+
+      # --prebuilt uploads .vercel/output only. Never `vercel build` or `vercel pull` here: those
+      # read, build or upload the whole checkout.
+      - name: Vercel deploy
+        id: deploy
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERCEL_VERSION: ${{ inputs.vercel-version }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        shell: bash
+        run: |
+          # The target is always explicit, so the CLI never picks one itself.
+          case "$ENVIRONMENT" in
+            production) target_flags=(--prod) ;;
+            *) target_flags=(--environment preview) ;;
+          esac
+          # The CLI prints the deployment URL on stdout and its progress on stderr. It reads the
+          # token from the VERCEL_TOKEN env var (and the scope from VERCEL_ORG_ID and
+          # VERCEL_PROJECT_ID), so the token never appears on a command line.
+          out=$(npx --yes "vercel@${VERCEL_VERSION}" deploy --prebuilt "${target_flags[@]}")
+          url=$(printf '%s\n' "$out" | tail -n 1 | tr -d '[:space:]')
+          if ! [[ "$url" =~ ^https://[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::vercel deploy did not print a deployment URL (last line: '$url')."
+            exit 1
+          fi
+
+          # Defence in depth for the pre-check: read the target back. It cannot undo a preview that
+          # went to production, but it fails the job instead of reporting a preview.
+          if [ "$ENVIRONMENT" = "preview" ]; then
+            # teamId only for a team scope, as in the pre-check.
+            team_query=""
+            if [[ "$VERCEL_ORG_ID" == team_* ]]; then team_query="?teamId=${VERCEL_ORG_ID}"; fi
+            body=$(mktemp)
+            trap 'rm -f "$body"' EXIT
+            code=$(curl -sS --retry 2 --max-time 30 -o "$body" -w '%{http_code}' \
+              -H @<(printf 'Authorization: Bearer %s\n' "$VERCEL_TOKEN") \
+              "https://api.vercel.com/v13/deployments/${url#https://}${team_query}") || code=000
+            if [ "$code" != 200 ]; then
+              echo "::error::Could not confirm that $url is a preview (Vercel API HTTP $code). Check its target in the Vercel dashboard."
+              exit 1
+            fi
+            # A preview's target is null. A body without the key at all ({} or an error object)
+            # confirms nothing, so it is refused like an unreadable one.
+            target=$(jq -er 'if has("target") then (.target // "preview") else error("no target") end' "$body" 2>/dev/null) || target=""
+            if [ "$target" != "preview" ]; then
+              echo "::error::$url was deployed as a preview but Vercel reports target '${target:-unreadable}'. If that is production, it is now live on the production domain: redeploy production from the default branch, or roll back in the Vercel dashboard."
+              exit 1
+            fi
+          fi
+
+          echo "url=$url" >>"$GITHUB_OUTPUT"
+          echo "Deployed to: $url"
+
+      - name: Summary
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          FOLDERS: ${{ inputs.folders }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          {
+            echo "### Vercel $ENVIRONMENT deploy (static)"
+            echo ""
+            echo "- URL: $DEPLOY_URL"
+            echo "- Commit: \`$HEAD_SHA\`"
+            # `folders` may be a multi-line block: one list item per folder keeps the markdown intact.
+            echo "- Published folders:"
+            read -r -d '' -a folders <<<"$FOLDERS" || true
+            for folder in "${folders[@]}"; do
+              echo "  - \`$folder\`"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Comment deploy URL on PR
+        if: ${{ github.event_name == 'pull_request' && steps.deploy.outcome == 'success' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            // One comment per environment, so a production deploy from a pull request does not
+            // overwrite the preview URL, and the label says which one it is.
+            const env = process.env.DEPLOY_ENV;
+            const marker = `<!-- vercel-deploy-static-comment:${env} -->`;
+            const body = [
+              marker,
+              `**Vercel ${env} deploy:** ${process.env.DEPLOY_URL}`,
+              '',
+              `Deployed from \`${process.env.HEAD_SHA}\`. If the Vercel project has Deployment Protection, opening it may require a Vercel login.`,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            // Only ever edit our own comment: a human can quote the marker, and their comment
+            // must never be overwritten.
+            const existing = comments.find(
+              (c) => c.user && c.user.login === 'github-actions[bot]' && (c.body || '').includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # Keep this the last step: `always()` makes it run after a failed or cancelled step too, so
+      # the deployment is not left `in_progress`. Skipped when the start step created none. The
+      # final state comes from the deploy outcome, not `job.status`, so a failed PR comment
+      # doesn't record a live deploy as failed.
+      - name: Finish GitHub deployment
+        if: ${{ always() && steps.gh-deployment.outputs.deployment-id != '' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOYMENT_ID: ${{ steps.gh-deployment.outputs.deployment-id }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            const { finish } = require('./.platform/.github/scripts/github-deployment.cjs');
+            await finish({ github, context, core });

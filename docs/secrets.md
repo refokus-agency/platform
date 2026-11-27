@@ -7,9 +7,9 @@ What secrets the reusables need, where they should live, and how to configure th
 | Secret | Used by | Expected level | Notes |
 |---|---|---|---|
 | `GITHUB_TOKEN` | all workflows | **automatic** | Built-in, generated per run. No setup needed. |
-| `VERCEL_TOKEN` | `deploy.yml` | **org** | Vercel personal or org-scoped token |
-| `VERCEL_ORG_ID` | `deploy.yml` | **org** | Same across all Refokus Vercel projects |
-| `VERCEL_PROJECT_ID` | `deploy.yml` | **repo** | Unique per Vercel project |
+| `VERCEL_TOKEN` | `deploy.yml`, `deploy-static.yml` | **org** | Vercel personal or org-scoped token |
+| `VERCEL_ORG_ID` | `deploy.yml`, `deploy-static.yml` | **org** | Same across all Refokus Vercel projects |
+| `VERCEL_PROJECT_ID` | `deploy.yml`, `deploy-static.yml` | **repo** | Unique per Vercel project |
 | `RELEASE_APP_ID` | `release.yml` | **org or repo** | Optional. GitHub App ID for branch-protection bypass on `main`. Required when using `@semantic-release/git` against a branch with a "PRs required" ruleset. |
 | `RELEASE_APP_PRIVATE_KEY` | `release.yml` | **org or repo** | Optional. PEM private key paired with `RELEASE_APP_ID`. |
 | `ANTHROPIC_API_KEY` | `code-review.yml` | **org or repo** | Optional. Anthropic API key for the AI code review. Without it the review skips green — it never fails the run. See [Anthropic credentials for code review](#anthropic-credentials-for-code-review) below. |
@@ -56,6 +56,7 @@ Each reusable's `workflow_call` → `secrets:` block is the source of truth. If 
 |---|---|
 | `ci.yml` | `CHECKOUT_TOKEN` |
 | `deploy.yml` | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `CHECKOUT_TOKEN` |
+| `deploy-static.yml` | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` |
 | `release.yml` | `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` |
 | `code-review.yml` | `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` |
 
@@ -90,6 +91,21 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}   # only with `submodules: true`
+```
+
+`deploy-static.yml`:
+
+```yaml
+jobs:
+  deploy:
+    uses: refokus-agency/platform/.github/workflows/deploy-static.yml@v2
+    with:
+      environment: preview   # or production
+      folders: wireframes artifacts
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 ```
 
 `release.yml`:
