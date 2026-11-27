@@ -108,10 +108,13 @@ jobs:
           fi
           exit "$failed"
 
-      # Default ref: on pull_request that is the merge commit, elsewhere the pushed commit.
+      # The pull request head, not the default merge commit: the deployment, the PR comment and
+      # the summary all report the head SHA, so the published content must be that commit.
+      # Elsewhere the pushed commit.
       - name: Checkout caller repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Checkout platform repo (for its scripts)

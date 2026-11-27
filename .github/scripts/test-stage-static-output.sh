@@ -225,14 +225,16 @@ case_symlinks() {
   says "4 symlink(s)"
 }
 
-# Rule 4 for the listed folder itself: a symlinked folder publishes nothing.
+# Rule 4 for the listed folder itself: a symlinked folder is an error, even next to real content.
 case_symlinked_folder() {
   ln -s "$REPO/brand-strategy" "$REPO/wireframes"
-  stage . .vercel/output wireframes
-  expect_rc 0
-  expect_valid_output
-  expect_staged
-  says "'wireframes' is a symlink"
+  put "artifacts/x.html" x
+  put ".vercel/output/sentinel" keep
+  stage . .vercel/output wireframes artifacts
+  expect_rc 1
+  says "::error::'wireframes' is a symlink"
+  expect_untouched_output
+  never_says "positioning.md"
 }
 
 # Rule 5: each folder's own README, whatever its case; a deeper README is content.
@@ -287,26 +289,47 @@ case_no_folders() {
   expect_untouched_output
 }
 
-# A missing folder (or a file with that name) publishes nothing, with a warning, not an error.
+# A missing folder (or a file with that name) is an error, even when another folder has content:
+# a renamed folder must not silently drop out of the site. Every bad name is reported, and the
+# previous output is left as it was.
 case_missing_folder() {
   put "wireframes/home.html" home
   put "artifacts" "a file, not a folder"
+  put ".vercel/output/sentinel" keep
   stage . .vercel/output wireframes artifacts typo
-  expect_rc 0
-  expect_staged wireframes/home.html
-  says "::warning::'typo' is not a folder"
-  says "::warning::'artifacts' is not a folder"
+  expect_rc 1
+  says "::error::'typo' is not a folder"
+  says "::error::'artifacts' is not a folder"
+  never_says "published:"
+  expect_untouched_output
 }
 
-# Folders with only a README and a .gitkeep stage a valid, empty output (a fresh template).
+# Zero files to publish is an error: `vercel deploy --prebuilt --prod` with an empty output would
+# replace the live site with nothing. Folders with only excluded files, or nothing at all.
 case_empty_output() {
   put "wireframes/README.md" doc
   put "artifacts/.gitkeep" ""
   mkdir -p "$REPO/wireframes/empty"
+  put ".vercel/output/sentinel" keep
   stage . .vercel/output wireframes artifacts
+  expect_rc 1
+  says "::error::No files to publish in: wireframes artifacts."
+  says "excluded (readme): wireframes/README.md"
+  says "excluded (dotfile): artifacts/.gitkeep"
+  expect_untouched_output
+  # Only symlinks: still nothing to publish.
+  rm -rf "$REPO/wireframes" "$REPO/artifacts"
+  mkdir -p "$REPO/wireframes"
+  ln -s "$REPO/DESIGN.md" "$REPO/wireframes/design.md"
+  stage . .vercel/output wireframes
+  expect_rc 1
+  says "::error::No files to publish in: wireframes."
+  expect_untouched_output
+  # --keep-readmes makes the README content, so the same folder deploys.
+  put "wireframes/README.md" doc
+  stage --keep-readmes . .vercel/output wireframes
   expect_rc 0
-  expect_valid_output
-  expect_staged
+  expect_staged wireframes/README.md
 }
 
 # Deleted or renamed files must disappear on the next deploy.
@@ -399,6 +422,9 @@ case_contract() {
   [ "$(yq '.on.workflow_call.inputs.exclude-readmes.default' "$WF")" = true ]; check "exclude-readmes defaults to true" $?
   [ "$(yq '.jobs.deploy | has("permissions")' "$WF")" = false ]; check "no job-level permissions block" $?
   [ "$(yq '.on.workflow_call.outputs.url.value' "$WF")" = '${{ jobs.deploy.outputs.url }}' ]; check "url output wired" $?
+  # What is published must be the commit the deployment, the PR comment and the summary report.
+  [ "$(yq '.jobs.deploy.steps[] | select(.name == "Checkout caller repo") | .with.ref' "$WF")" = '${{ github.event.pull_request.head.sha || github.sha }}' ]
+  check "caller checkout is the PR head, not the merge commit" $?
   yq '.jobs.deploy.steps[] | select(.name == "Finish GitHub deployment") | .if' "$WF" | grep -qF 'always()'
   check "finish step runs under always()" $?
   [ "$(yq '.jobs.deploy.steps[-1].name' "$WF")" = "Finish GitHub deployment" ]; check "finish is the last step" $?
@@ -478,6 +504,11 @@ case_stage_step() {
   run_step
   expect_rc 2
   says "'../docs' is not a plain top-level folder name"
+  # A renamed folder fails the step, so the deploy never runs.
+  export FOLDERS="wireframes artefacts"
+  run_step
+  expect_rc 1
+  says "::error::'artefacts' is not a folder"
 }
 
 case_stage_step_old_platform_ref() {

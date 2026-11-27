@@ -34,9 +34,12 @@ permissions:
   contents: read
   deployments: write
 
+# Production deploys queue instead of cancelling each other: a run cancelled mid
+# `vercel deploy --prod` leaves Vercel to finish the deploy server-side while its GitHub
+# deployment record is marked failed. The next push still waits and then deploys the latest.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy-production:

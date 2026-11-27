@@ -14,8 +14,8 @@
 # The rules, in the order they apply:
 #   1. Each <folder> is a plain top-level folder name: letters, digits, `.`, `_` and `-`, not
 #      starting with `.` or `-`. No `/`, so no `..`, no absolute path and no nested path. A listed name
-#      that is not a real directory (missing, a file or a symlink) publishes nothing, with a
-#      warning, so a typo does not pass unnoticed.
+#      that is not a real directory (missing, a file or a symlink) is an error, so a renamed or
+#      mistyped folder fails the deploy instead of publishing a site without it.
 #   2. Only regular files under those folders are published, at any depth.
 #   3. A file or folder whose name starts with `.` is left out, at any depth, and a dot-folder is
 #      not descended into (.DS_Store, .gitkeep, .drafts/).
@@ -24,10 +24,13 @@
 #   5. Unless --keep-readmes, each folder's own README.md (directly inside it, any case) is left
 #      out: it documents the repository for the team and is not published content. A README.md
 #      deeper down belongs to the content next to it and is published.
+#   6. At least one file must be published. An empty output would replace the live site with
+#      nothing on a production deploy, so zero files is an error, not an empty deploy.
 #
 # Prints each published path on stdout, then each excluded path with its reason, then a count.
-# Exit codes: 0 staged (possibly nothing); 2 usage error, an invalid folder name or an <out-dir>
-# outside the repository.
+# Exit codes: 0 staged at least one file; 1 a listed folder is not a real directory, or nothing
+# to publish; 2 usage error, an invalid folder name or an <out-dir> outside the repository.
+# <out-dir> is left untouched on every non-zero exit.
 
 set -euo pipefail
 
@@ -106,19 +109,21 @@ esac
 INCLUDED=()
 EXCLUDED=()  # "<reason> <path>"
 n_dotfile=0 n_symlink=0 n_readme=0
+NOT_FOLDERS=0
 
 # Case-insensitive match for rule 5: the Linux runner treats README.md and readme.md as two files.
 shopt -s nocasematch
 
 for folder in "${FOLDERS[@]}"; do
+  # Rule 1: every listed name must be a real folder. All of them are reported before failing.
   if [ -L "$folder" ]; then
-    EXCLUDED+=("symlink $folder")
-    n_symlink=$((n_symlink + 1))
-    echo "::warning::'$folder' is a symlink, not a folder: nothing published from it." >&2
+    echo "::error::'$folder' is a symlink, not a folder. Symlinks are never followed: list a real top-level folder." >&2
+    NOT_FOLDERS=$((NOT_FOLDERS + 1))
     continue
   fi
   if [ ! -d "$folder" ]; then
-    echo "::warning::'$folder' is not a folder in this repository: nothing published from it." >&2
+    echo "::error::'$folder' is not a folder in this repository. Was it renamed or mistyped? Fix 'folders' in the caller workflow." >&2
+    NOT_FOLDERS=$((NOT_FOLDERS + 1))
     continue
   fi
 
@@ -145,6 +150,20 @@ for folder in "${FOLDERS[@]}"; do
 done
 
 shopt -u nocasematch
+
+# Rules 1 and 6, checked before <out-dir> is wiped. `vercel deploy --prebuilt --prod` with an
+# empty output would take the live site down, so neither case may reach the deploy.
+if [ "$NOT_FOLDERS" -gt 0 ]; then
+  echo "error: $NOT_FOLDERS listed folder(s) are not folders in this repository. Nothing was staged." >&2
+  exit 1
+fi
+if [ "${#INCLUDED[@]}" -eq 0 ]; then
+  for entry in ${EXCLUDED[@]+"${EXCLUDED[@]}"}; do
+    echo "excluded (${entry%% *}): ${entry#* }"
+  done
+  echo "::error::No files to publish in: ${FOLDERS[*]}. Every file there is excluded (dotfiles, symlinks, folder READMEs) or the folders are empty. Deploying an empty output would replace the site with nothing, so nothing was staged." >&2
+  exit 1
+fi
 
 # Wiped first: a file deleted or renamed in the repository must disappear on the next deploy.
 rm -rf "$OUT_DIR"
