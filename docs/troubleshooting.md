@@ -178,19 +178,19 @@ If you don't want to set up a GitHub App, two alternatives:
 
 ## Workflow run is using old reusable code
 
-**Symptoms:** you fixed a bug in `platform`, the release-please PR was merged (so a new release exists), but callers on `@v1` are still hitting the old behavior.
+**Symptoms:** you fixed a bug in `platform`, the release-please PR was merged (so a new release exists), but callers on `@v2` are still hitting the old behavior. (Callers on `@v1` never get it: `v1` is frozen at `v1.12.1`; see [migration.md → Upgrading from v1 to v2](migration.md#upgrading-from-v1-to-v2).)
 
 **Causes (in order of likelihood):**
 
 1. The release-please PR was merged but no new release was actually cut yet. Check the [Actions tab](https://github.com/refokus-agency/platform/actions/workflows/release-please.yml) for the latest `Release Please` run and confirm a release was created.
-2. `@v1` hasn't been force-moved yet. Run `git ls-remote origin refs/tags/v1` and compare the SHA against the latest release commit; they should match.
+2. `@v2` hasn't been force-moved yet. Run `git ls-remote origin refs/tags/v2` and compare the SHA against the latest release commit; they should match.
 3. GitHub caches reusable workflow content briefly (seconds to a minute). Usually self-resolves.
 
 **Fix:**
 
 - Wait 1–2 minutes, then re-run.
 - If it persists, try a `workflow_dispatch` manual trigger to force a fresh run.
-- Verify the caller's `@v1` ref is actually pulling latest by checking the reusable's first step in the logs — the action URL includes a SHA.
+- Verify the caller's `@v2` ref is actually pulling latest by checking the reusable's first step in the logs — the action URL includes a SHA.
 - If the consumer needs a fix urgently and the release-please cycle is too slow, temporarily switch the caller to `@main` (or a specific commit SHA) until the next release lands.
 
 ## Code review finishes green but posts no comment
